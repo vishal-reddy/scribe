@@ -1,0 +1,193 @@
+name: UAT Environment
+
+# Triggers: PR lifecycle events (opened, updated, closed)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+# Prevent concurrent UAT deployments for the same PR
+concurrency:
+  group: uat-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Required for commenting on PRs
+permissions:
+  pull-requests: write
+
+jobs:
+  # Deploy UAT environment for active PRs
+  deploy-uat:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npm test
+
+      # Create or reuse a D1 database for this PR
+      - name: Create or reuse UAT D1 database
+        id: d1
+        run: |
+          DB_NAME="scribe-uat-pr-${PR_NUMBER}"
+
+          # Check if database already exists
+          EXISTING=$(curl -s \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database?name=${DB_NAME}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+
+          DB_ID=$(echo "$EXISTING" | jq -r '.result[0].uuid // empty')
+
+          if [ -n "$DB_ID" ]; then
+            echo "Reusing existing D1 database: ${DB_ID}"
+          else
+            echo "Creating new D1 database: ${DB_NAME}"
+            RESPONSE=$(curl -s -X POST \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\": \"${DB_NAME}\"}")
+
+            DB_ID=$(echo "$RESPONSE" | jq -r '.result.uuid // empty')
+            if [ -z "$DB_ID" ]; then
+              echo "::error::Failed to create D1 database"
+              echo "$RESPONSE" | jq .
+              exit 1
+            fi
+            echo "Created D1 database: ${DB_ID}"
+          fi
+
+          echo "db_id=${DB_ID}" >> "$GITHUB_OUTPUT"
+          echo "db_name=${DB_NAME}" >> "$GITHUB_OUTPUT"
+
+      # Generate a UAT-specific wrangler.toml with PR-specific database
+      - name: Generate UAT wrangler.toml
+        run: |
+          DB_NAME="scribe-uat-pr-${PR_NUMBER}"
+          DB_ID="${{ steps.d1.outputs.db_id }}"
+
+          # Modify wrangler.toml for UAT deployment
+          sed -i \
+            -e 's/^name = .*/name = "'"${DB_NAME}"'"/' \
+            -e 's/^database_name = .*/database_name = "'"${DB_NAME}"'"/' \
+            -e 's/^database_id = .*/database_id = "'"${DB_ID}"'"/' \
+            -e '/^routes = \[/,/^\]/d' \
+            wrangler.toml
+
+          # Add UAT environment variable if not already present
+          if ! grep -q "ENVIRONMENT" wrangler.toml; then
+            echo "" >> wrangler.toml
+            echo "[vars]" >> wrangler.toml
+            echo "ENVIRONMENT = \"uat\"" >> wrangler.toml
+          else
+            sed -i 's/^ENVIRONMENT = .*/ENVIRONMENT = "uat"/' wrangler.toml
+          fi
+
+          echo "--- UAT wrangler.toml ---"
+          cat wrangler.toml
+
+      # Apply D1 migrations to UAT database
+      # Note: This step will be uncommented when migrations are created
+      # - name: Apply D1 migrations
+      #   run: npx wrangler d1 migrations apply "scribe-uat-pr-${PR_NUMBER}" --remote
+
+      # Deploy the worker to Cloudflare
+      - name: Deploy UAT worker
+        run: npx wrangler deploy
+
+      # Comment on PR with UAT deployment URL
+      - name: Comment UAT URL on PR
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            <!-- uat-deploy -->
+            ## 🚀 UAT Environment Deployed
+
+            | Resource | URL |
+            |----------|-----|
+            | **UAT App** | https://scribe-uat-pr-${{ github.event.pull_request.number }}.vishal-reddy.workers.dev |
+            | **Health Check** | https://scribe-uat-pr-${{ github.event.pull_request.number }}.vishal-reddy.workers.dev/health |
+
+            _Last deployed: ${{ github.sha }} · [View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_
+          edit-mode: replace
+
+  # Clean up UAT resources when PR is closed
+  cleanup-uat:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      # Delete the UAT worker deployment
+      - name: Delete UAT worker
+        run: |
+          WORKER_NAME="scribe-uat-pr-${PR_NUMBER}"
+          echo "Deleting worker: ${WORKER_NAME}"
+          RESPONSE=$(curl -s -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          echo "$RESPONSE" | jq .
+
+      # Delete the UAT D1 database
+      - name: Delete UAT D1 database
+        run: |
+          DB_NAME="scribe-uat-pr-${PR_NUMBER}"
+
+          # Look up the database ID by name
+          EXISTING=$(curl -s \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database?name=${DB_NAME}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+
+          DB_ID=$(echo "$EXISTING" | jq -r '.result[0].uuid // empty')
+
+          if [ -z "$DB_ID" ]; then
+            echo "D1 database ${DB_NAME} not found — may have already been deleted"
+            exit 0
+          fi
+
+          echo "Deleting D1 database: ${DB_NAME} (${DB_ID})"
+          RESPONSE=$(curl -s -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DB_ID}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          echo "$RESPONSE" | jq .
+
+      # Comment on PR about cleanup
+      - name: Comment cleanup on PR
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            <!-- uat-deploy -->
+            ## 🧹 UAT Environment Cleaned Up
+
+            The UAT worker and D1 database for this PR have been deleted.
+
+            _Cleaned up by: [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_
+          edit-mode: replace
+
+# Required GitHub Secrets (set in repository settings):
+# - CLOUDFLARE_API_TOKEN: API token with Workers and D1 permissions
+# - CLOUDFLARE_ACCOUNT_ID: Your Cloudflare account ID
+#
+# UAT Environment Details:
+# - Worker Name: scribe-uat-pr-{PR_NUMBER}
+# - Database Name: scribe-uat-pr-{PR_NUMBER}
+# - Worker URL: https://scribe-uat-pr-{PR_NUMBER}.vishal-reddy.workers.dev
+# - Environment Variable: ENVIRONMENT=uat

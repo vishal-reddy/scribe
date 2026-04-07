@@ -1,0 +1,74 @@
+name: CI
+
+# Triggers: Push to main branch and all pull requests
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Run type-checking and tests on all events (push and PR)
+  check:
+    name: Lint, Type-check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+  # Deploy to production only on main branch push (after check passes)
+  deploy:
+    name: Deploy to Cloudflare
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Requires manual approval via GitHub environment protection rules
+    environment: production
+    # Prevent concurrent deployments
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      # Apply D1 database migrations to production
+      # Note: This step will be added when migrations are created
+      # - name: Run D1 Migrations
+      #   uses: cloudflare/wrangler-action@v3
+      #   with:
+      #     apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #     command: d1 migrations apply scribe-db --remote
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+# Required GitHub Secrets (set in repository settings):
+# - CLOUDFLARE_API_TOKEN: API token with Workers and D1 permissions
+# - CLOUDFLARE_ACCOUNT_ID: Your Cloudflare account ID
+#
+# Required GitHub Environment (create in repository settings):
+# - production: Environment with manual approval required for deployments

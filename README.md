@@ -1,5 +1,7 @@
 # Scribe
 
+![CI](https://github.com/vishal-reddy/scribe/workflows/CI/badge.svg)
+
 A Claude-powered collaborative markdown document editor
 
 ## Overview
@@ -59,12 +61,43 @@ npm run dev
 # Run tests
 npm test
 
-# Build for production
-npm run build
+# Type-check
+npm run typecheck
 
 # Deploy to Cloudflare
 npm run deploy
 ```
+
+### Deployment
+
+Scribe uses GitHub Actions for automated deployment:
+
+#### Production Deployment
+- **Trigger**: Push to `main` branch
+- **Process**: Automatic type-checking, testing, and deployment to Cloudflare Workers
+- **Approval**: Requires manual approval via GitHub environment protection
+- **Database**: Uses `scribe-db` D1 database
+
+#### UAT Environment (Pull Requests)
+- **Trigger**: Opening or updating a pull request
+- **Features**:
+  - Automatic deployment to PR-specific worker (`scribe-uat-pr-{PR_NUMBER}`)
+  - Isolated D1 database for each PR
+  - Comment on PR with deployment URL
+  - Automatic cleanup when PR is closed
+- **URL Pattern**: `https://scribe-uat-pr-{PR_NUMBER}.vishal-reddy.workers.dev`
+
+#### Required Secrets
+Configure these in your GitHub repository settings (Settings → Secrets and variables → Actions):
+
+- `CLOUDFLARE_API_TOKEN`: API token with Workers and D1 permissions
+- `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare account ID
+
+#### GitHub Environment Setup
+Create a `production` environment in your repository settings (Settings → Environments):
+1. Click "New environment" and name it `production`
+2. Add required reviewers for manual deployment approval
+3. (Optional) Add deployment protection rules
 
 ## Documentation
 

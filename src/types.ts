@@ -4,6 +4,7 @@ import type { D1Database, DurableObjectNamespace, AnalyticsEngineDataset } from 
 export interface Env {
   DB: D1Database;
   DOCUMENT_SYNC: DurableObjectNamespace;
+  SCRIBE_MCP: DurableObjectNamespace;
   ANALYTICS?: AnalyticsEngineDataset;
   CF_ACCESS_TEAM_DOMAIN?: string;
   CF_ACCESS_AUDIENCE?: string;

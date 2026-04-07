@@ -10,8 +10,8 @@ import { bodySizeLimit, sanitizeInput } from './middleware/sanitize';
 import health from './routes/health';
 import sync from './routes/sync';
 import documents from './routes/documents';
-import mcp from './routes/mcp';
 import claude from './routes/claude';
+import { ScribeMCP } from './mcp/scribe-mcp';
 import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -100,9 +100,6 @@ app.route('/api/documents', documents);
 app.use('/api/claude/*', claudeRateLimit);
 app.route('/api/claude', claude);
 
-// MCP endpoint (requires auth)
-app.route('/mcp', mcp);
-
 // Global error handler
 app.onError(errorHandler);
 
@@ -111,7 +108,19 @@ app.notFound((c) => {
   return c.json({ error: 'Not found' }, 404);
 });
 
-export default app;
+// MCP handler — routes /mcp to the ScribeMCP Durable Object
+const mcpHandler = ScribeMCP.serve("/mcp", { binding: "SCRIBE_MCP" });
 
-// Export Durable Object
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith('/mcp')) {
+      return mcpHandler.fetch(request, env, ctx);
+    }
+    return app.fetch(request, env, ctx);
+  },
+};
+
+// Export Durable Object classes
 export { DocumentSync } from './durable-objects/DocumentSync';
+export { ScribeMCP } from './mcp/scribe-mcp';

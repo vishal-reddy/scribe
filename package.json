@@ -1,13 +1,41 @@
 {
   "name": "scribe",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Scribe - Cloudflare Workers API",
+  "main": "src/index.ts",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply scribe-db",
+    "db:migrate:uat": "wrangler d1 migrations apply scribe-uat-db",
+    "db:studio": "drizzle-kit studio"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs"
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@hono/zod-validator": "^0.7.6",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "agents": "^0.10.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.11",
+    "y-websocket": "^3.0.0",
+    "yjs": "^13.6.30",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.14.1",
+    "@cloudflare/workers-types": "^4.20260405.1",
+    "@sentry/node": "^10.47.0",
+    "@sentry/types": "^10.47.0",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2",
+    "wrangler": "^4.80.0"
+  }
 }

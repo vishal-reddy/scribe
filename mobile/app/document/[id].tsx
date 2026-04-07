@@ -13,9 +13,11 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useDocument } from '../../lib/hooks/use-documents';
 import { useYjsDocument } from '../../lib/hooks/use-yjs-document';
+import { useCollaboration } from '../../lib/hooks/use-collaboration';
 import BlockNoteEditor, { BlockNoteEditorRef } from '../../components/BlockNoteEditor';
 import MarkdownEditor, { MarkdownEditorRef } from '../../components/MarkdownEditor';
 import SyncStatus from '../../components/SyncStatus';
+import ClaudeEditingBanner from '../../components/ClaudeEditingBanner';
 import { documentsService } from '../../lib/services/documents';
 
 // Use BlockNote on web, MarkdownEditor on mobile (for now)
@@ -78,6 +80,23 @@ export default function DocumentEditorScreen() {
 
   // Use Y.js with WebSocket for real-time sync
   const { markdown, isConnected, updateContent, ydoc } = useYjsDocument(documentId);
+
+  // Collaboration awareness — detect Claude edits
+  const {
+    isClaudeEditing,
+    lastEditor,
+    collaboratorCount,
+    dismissClaudeEditing,
+  } = useCollaboration(documentId);
+
+  // Dismiss Claude banner when the user starts typing
+  const handleContentChange = useCallback(
+    (md: string) => {
+      if (isClaudeEditing) dismissClaudeEditing();
+      updateContent(md);
+    },
+    [isClaudeEditing, dismissClaudeEditing, updateContent]
+  );
 
   // Track auto-save timestamp whenever Y.js reports connected after a content change
   useEffect(() => {
@@ -208,6 +227,9 @@ export default function DocumentEditorScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
+      {/* Claude editing banner */}
+      <ClaudeEditingBanner visible={isClaudeEditing} onDismiss={dismissClaudeEditing} />
+
       {/* Header */}
       <View className="p-4 border-b border-gray-200">
         <View className="flex-row justify-between items-center mb-2">
@@ -262,7 +284,12 @@ export default function DocumentEditorScreen() {
 
         {/* Sync / save status */}
         <View className="flex-row items-center justify-between">
-          <SyncStatus isSynced={isConnected} lastSynced={undefined} />
+          <SyncStatus
+            isSynced={isConnected}
+            lastSynced={undefined}
+            lastEditor={lastEditor}
+            collaboratorCount={collaboratorCount}
+          />
           <Text className="text-xs text-gray-400">
             {isConnected
               ? lastSavedAt
@@ -301,14 +328,14 @@ export default function DocumentEditorScreen() {
         <BlockNoteEditor
           ref={blockNoteRef}
           initialContent={markdown}
-          onContentChange={(md) => updateContent(md)}
+          onContentChange={handleContentChange}
           ydoc={ydoc}
         />
       ) : (
         <MarkdownEditor
           ref={markdownEditorRef}
           initialContent={markdown}
-          onContentChange={updateContent}
+          onContentChange={handleContentChange}
         />
       )}
 

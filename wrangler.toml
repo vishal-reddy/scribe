@@ -5,3 +5,25 @@ compatibility_flags = ["nodejs_compat"]
 
 [observability]
 enabled = true
+
+[vars]
+ENVIRONMENT = "production"
+# Comma-separated list of allowed CORS origins for production
+# ALLOWED_ORIGINS = "https://scribe.example.com"
+
+# In production, set via: wrangler secret put ANTHROPIC_API_KEY
+# For local dev, add to .dev.vars file
+
+[[durable_objects.bindings]]
+name = "DOCUMENT_SYNC"
+class_name = "DocumentSync"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["DocumentSync"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "scribe-db"
+database_id = "4f10070e-b7be-4922-916d-a41765388d46"
+migrations_dir = "src/db/migrations"

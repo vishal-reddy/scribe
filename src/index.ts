@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
+import { requestId } from './middleware/request-id';
 import { structuredLogger } from './middleware/logger';
 import { errorHandler } from './middleware/error-handler';
 import { authMiddleware } from './middleware/auth';
@@ -14,6 +15,9 @@ import claude from './routes/claude';
 import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Request ID must be first so all downstream middleware/handlers have it
+app.use('*', requestId);
 
 // Global middleware
 app.use('*', structuredLogger);

@@ -113,10 +113,49 @@ app.notFound((c) => {
 // MCP handler — routes /mcp to the ScribeMCP Durable Object
 const mcpHandler = ScribeMCP.serve("/mcp", { binding: "SCRIBE_MCP" });
 
+/**
+ * Validate MCP authentication via Bearer token.
+ * In dev mode (ENVIRONMENT !== 'production'), auth is skipped.
+ * If no MCP_AUTH_TOKEN is configured, auth is skipped (for initial setup).
+ */
+function validateMcpAuth(request: Request, env: Env): Response | null {
+  // Skip auth in dev/test
+  if (env.ENVIRONMENT && env.ENVIRONMENT !== 'production') {
+    return null;
+  }
+
+  // No token configured = open (for initial setup)
+  if (!env.MCP_AUTH_TOKEN) {
+    return null;
+  }
+
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    if (token === env.MCP_AUTH_TOKEN) {
+      return null; // Auth passed
+    }
+  }
+
+  return new Response(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      error: {
+        code: -32000,
+        message: 'Unauthorized: provide Authorization: Bearer <token> header',
+      },
+      id: null,
+    }),
+    { status: 401, headers: { 'Content-Type': 'application/json' } }
+  );
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/mcp')) {
+      const authError = await validateMcpAuth(request, env);
+      if (authError) return authError;
       return mcpHandler.fetch(request, env, ctx);
     }
     return app.fetch(request, env, ctx);

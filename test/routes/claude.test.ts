@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { env } from 'cloudflare:test';
-import app from '../../src/index';
+import { app } from '../../src/index';
 import { applyMigrations, getAuthHeaders } from '../helpers';
 
 vi.mock('@anthropic-ai/sdk', () => ({

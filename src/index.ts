@@ -66,7 +66,9 @@ app.use('*', bodySizeLimit());
 app.get('/', (c) => c.json({ 
   service: 'scribe',
   version: '1.0.0',
-  docs: '/health'
+  mcp: '/mcp',
+  docs: '/health',
+  description: 'Connect Claude Desktop/Code to /mcp to use your Claude subscription as a Scribe connector',
 }));
 
 // Health routes (no auth required)
@@ -120,6 +122,9 @@ export default {
     return app.fetch(request, env, ctx);
   },
 };
+
+// Export Hono app for testing
+export { app };
 
 // Export Durable Object classes
 export { DocumentSync } from './durable-objects/DocumentSync';

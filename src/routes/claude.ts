@@ -20,6 +20,29 @@ function parsePagination(c: { req: { query: (key: string) => string | undefined 
 }
 
 /**
+ * Check Claude integration status
+ * GET /api/claude/status
+ */
+claude.get('/status', async (c) => {
+  const hasApiKey = !!c.env.ANTHROPIC_API_KEY;
+  return c.json({
+    modes: {
+      mcp: {
+        available: true,
+        endpoint: '/mcp',
+        description: 'Connect Claude Desktop or Claude Code to use your Claude subscription directly',
+      },
+      api: {
+        available: hasApiKey,
+        description: hasApiKey
+          ? 'In-app Claude chat is active via API key'
+          : 'Set ANTHROPIC_API_KEY to enable in-app Claude chat. Otherwise use MCP with your Claude subscription.',
+      },
+    },
+  });
+});
+
+/**
  * List all documents (artifacts) for Claude
  * GET /api/claude/artifacts
  */
@@ -162,6 +185,13 @@ claude.post('/edit/:id', zValidator('json', claudeEditDocumentSchema), async (c)
   const artifactId = c.req.param('id');
   const data = c.req.valid('json');
 
+  if (!c.env.ANTHROPIC_API_KEY) {
+    return c.json({
+      error: 'ANTHROPIC_API_KEY not configured',
+      hint: 'Use Claude Desktop or Claude Code with the MCP connector instead. Connect to /mcp to use your Claude subscription directly.',
+    }, 501);
+  }
+
   try {
     // Get current document
     const doc = await db
@@ -244,6 +274,13 @@ claude.post('/prompt', zValidator('json', claudePromptSchema), async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const data = c.req.valid('json');
   const userId = c.get('userId');
+
+  if (!c.env.ANTHROPIC_API_KEY) {
+    return c.json({
+      error: 'ANTHROPIC_API_KEY not configured',
+      hint: 'Use Claude Desktop or Claude Code with the MCP connector instead. Connect to /mcp to use your Claude subscription directly.',
+    }, 501);
+  }
 
   try {
     // Initialize Anthropic client

@@ -8,7 +8,7 @@ export interface Env {
   ANALYTICS?: AnalyticsEngineDataset;
   CF_ACCESS_TEAM_DOMAIN?: string;
   CF_ACCESS_AUDIENCE?: string;
-  ANTHROPIC_API_KEY: string;
+  ANTHROPIC_API_KEY?: string;
   SENTRY_DSN?: string;
   ENVIRONMENT?: string;
   ALLOWED_ORIGINS?: string;

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    #editor { min-height: 100vh; padding: 16px; }
+  </style>
+  <script src="https://unpkg.com/@blocknote/core@latest/dist/browser/index.js"></script>
+  <script src="https://unpkg.com/@blocknote/mantine@latest/dist/browser/index.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/@blocknote/core@latest/dist/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@blocknote/mantine@latest/dist/style.css">
+</head>
+<body>
+  <div id="editor"></div>
+  <script>
+    const { BlockNoteEditor } = window.BlockNoteCore;
+    const { useBlockNoteEditor, BlockNoteView } = window.BlockNoteMantine;
+
+    let editor;
+
+    // Initialize editor
+    async function initEditor(initialContent) {
+      editor = BlockNoteEditor.create({
+        initialContent: initialContent ? JSON.parse(initialContent) : undefined,
+      });
+
+      // Listen to changes
+      editor.onChange(() => {
+        const blocks = editor.document;
+        const markdown = editor.blocksToMarkdownLossy(blocks);
+        
+        // Send update to React Native
+        window.ReactNativeWebView?.postMessage(JSON.stringify({
+          type: 'contentChange',
+          blocks: blocks,
+          markdown: markdown,
+        }));
+      });
+
+      // Render editor
+      const container = document.getElementById('editor');
+      const view = BlockNoteView({ editor });
+      // Note: This is simplified - actual BlockNote rendering may differ
+      container.innerHTML = '';
+      // Render logic would go here
+      
+      // Notify RN that editor is ready
+      window.ReactNativeWebView?.postMessage(JSON.stringify({
+        type: 'ready',
+      }));
+    }
+
+    // Listen for messages from React Native
+    document.addEventListener('message', (event) => {
+      const data = JSON.parse(event.data);
+      
+      if (data.type === 'init') {
+        initEditor(data.content);
+      } else if (data.type === 'setContent') {
+        editor?.replaceBlocks(editor.document, JSON.parse(data.content));
+      } else if (data.type === 'getContent') {
+        const blocks = editor?.document;
+        const markdown = editor?.blocksToMarkdownLossy(blocks);
+        window.ReactNativeWebView?.postMessage(JSON.stringify({
+          type: 'content',
+          blocks: blocks,
+          markdown: markdown,
+        }));
+      }
+    });
+
+    // Initialize immediately for testing
+    initEditor();
+  </script>
+</body>
+</html>

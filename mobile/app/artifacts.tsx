@@ -8,7 +8,11 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useClaudeArtifacts } from '../lib/hooks/use-claude';
+
+const BURGUNDY = '#971B2F';
+const CREAM_BG = '#FAFAF7';
 
 export default function ArtifactsScreen() {
   const router = useRouter();
@@ -16,8 +20,8 @@ export default function ArtifactsScreen() {
 
   if (isLoading) {
     return (
-      <View className="flex-1 justify-center items-center bg-white">
-        <ActivityIndicator size="large" color="#971B2F" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CREAM_BG }}>
+        <ActivityIndicator size="large" color={BURGUNDY} />
       </View>
     );
   }
@@ -25,67 +29,101 @@ export default function ArtifactsScreen() {
   const artifacts = data || [];
 
   return (
-    <View className="flex-1 bg-white">
-      <View className="p-4 border-b border-gray-200">
-        <Text className="text-2xl font-bold">Artifacts</Text>
-        <Text className="text-gray-600 mt-1">
-          Documents from Claude's perspective
+    <View style={{ flex: 1, backgroundColor: CREAM_BG }}>
+      {/* Header */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 }}>
+        <Text style={{ fontSize: 24, fontWeight: '700', color: '#1E1E1E' }}>Artifacts</Text>
+        <Text style={{ fontSize: 14, color: '#9E9A96', marginTop: 4 }}>
+          Created by Claude during your sessions
         </Text>
       </View>
 
       {artifacts.length === 0 ? (
-        <View className="flex-1 justify-center items-center p-6">
-          <Text className="text-gray-500 text-center">No artifacts yet</Text>
-          <Text className="text-gray-400 text-sm mt-2 text-center">
-            Claude will create artifacts as you interact
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <Ionicons name="sparkles-outline" size={56} color="#D5D1CC" style={{ marginBottom: 16 }} />
+          <Text style={{ fontSize: 18, fontWeight: '600', color: '#7A7672', textAlign: 'center' }}>
+            No artifacts yet
+          </Text>
+          <Text style={{ fontSize: 14, color: '#B0ACA8', marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+            Claude will create artifacts as you{'\n'}collaborate on your writing
           </Text>
         </View>
       ) : (
         <FlatList
           data={artifacts}
           keyExtractor={(item) => item.artifactId}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
           refreshControl={
             <RefreshControl
               refreshing={isLoading}
               onRefresh={refetch}
-              tintColor="#971B2F"
+              tintColor={BURGUNDY}
             />
           }
           renderItem={({ item }) => (
             <TouchableOpacity
-              className="p-4 border-b border-gray-100"
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 14,
+                marginBottom: 12,
+                overflow: 'hidden',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.06,
+                shadowRadius: 8,
+                elevation: 3,
+              }}
               onPress={() => router.push(`/document/${item.artifactId}`)}
+              activeOpacity={0.7}
             >
-              <View className="flex-row justify-between items-start">
-                <View className="flex-1">
-                  <Text className="font-semibold text-lg mb-1">
+              <View style={{ flexDirection: 'row' }}>
+                {/* Left accent bar */}
+                <View style={{ width: 4, backgroundColor: BURGUNDY }} />
+
+                <View style={{ flex: 1, padding: 16 }}>
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: '#1E1E1E', marginBottom: 6 }}>
                     {item.title}
                   </Text>
-                  <Text className="text-gray-600 text-sm mb-2" numberOfLines={2}>
-                    {item.content.substring(0, 100)}...
+                  <Text
+                    style={{ fontSize: 14, color: '#7A7672', lineHeight: 20, marginBottom: 10 }}
+                    numberOfLines={2}
+                  >
+                    {item.content.substring(0, 120)}...
                   </Text>
-                  <View className="flex-row gap-4">
-                    <Text className="text-xs text-gray-400">
+
+                  {/* Metadata row */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                    <Ionicons name="time-outline" size={12} color="#B0ACA8" style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 12, color: '#B0ACA8', marginRight: 16 }}>
                       Created: {new Date(item.createdAt).toLocaleDateString()}
                     </Text>
-                    <Text className="text-xs text-gray-400">
+                    <Ionicons name="refresh-outline" size={12} color="#B0ACA8" style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 12, color: '#B0ACA8' }}>
                       Updated: {new Date(item.updatedAt).toLocaleDateString()}
                     </Text>
                   </View>
-                  <View className="flex-row gap-2 mt-2">
+
+                  {/* Tags */}
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
                     {item.author === 'claude' && (
-                      <View className="bg-primary/10 px-2 py-1 rounded">
-                        <Text className="text-xs text-primary">Created by Claude</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(151,27,47,0.08)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                        <Ionicons name="sparkles" size={11} color={BURGUNDY} style={{ marginRight: 3 }} />
+                        <Text style={{ fontSize: 11, color: BURGUNDY, fontWeight: '600' }}>Created by Claude</Text>
                       </View>
                     )}
                     {item.lastEditor === 'claude' && (
-                      <View className="bg-primary/10 px-2 py-1 rounded">
-                        <Text className="text-xs text-primary">Edited by Claude</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(151,27,47,0.08)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                        <Ionicons name="create-outline" size={11} color={BURGUNDY} style={{ marginRight: 3 }} />
+                        <Text style={{ fontSize: 11, color: BURGUNDY, fontWeight: '600' }}>Edited by Claude</Text>
                       </View>
                     )}
                   </View>
                 </View>
-                <Text className="text-gray-400">›</Text>
+
+                {/* Chevron */}
+                <View style={{ justifyContent: 'center', paddingRight: 12 }}>
+                  <Ionicons name="chevron-forward" size={18} color="#D5D1CC" />
+                </View>
               </View>
             </TouchableOpacity>
           )}

@@ -12,9 +12,13 @@ import {
   ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useClaudePrompt } from '../lib/hooks/use-claude';
 import { useDocument, useUpdateDocument } from '../lib/hooks/use-documents';
 import type { Message } from '../lib/types';
+
+const BURGUNDY = '#971B2F';
+const CREAM_BG = '#FAFAF7';
 
 // ─── Quick action chips for document context ──────────────────────────────
 
@@ -123,72 +127,115 @@ export default function ClaudeChatScreen() {
 
   // ── Render a single message ─────────────────────────────────────────────
 
-  const renderMessage = ({ item }: { item: Message }) => (
-    <View className={`mb-4 ${item.role === 'user' ? 'items-end' : 'items-start'}`}>
-      <View
-        className={`max-w-[80%] p-3 rounded-lg ${
-          item.role === 'user' ? 'bg-primary' : 'bg-gray-200'
-        }`}
-      >
-        <Text className={item.role === 'user' ? 'text-white' : 'text-gray-900'}>
-          {item.content}
-        </Text>
-      </View>
-      <View className="flex-row items-center gap-2 mt-1">
-        <Text className="text-xs text-gray-500">{item.timestamp.toLocaleTimeString()}</Text>
-        {item.role === 'assistant' && documentId && (
-          <TouchableOpacity
-            className="bg-primary/10 px-2 py-0.5 rounded"
-            onPress={() => handleApply(item.content)}
-            disabled={updateDocument.isPending}
-          >
-            <Text className="text-xs font-medium text-primary">
-              {updateDocument.isPending ? 'Applying...' : 'Apply to document'}
-            </Text>
-          </TouchableOpacity>
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isUser = item.role === 'user';
+
+    return (
+      <View style={{ marginBottom: 16, alignItems: isUser ? 'flex-end' : 'flex-start' }}>
+        {/* Claude label */}
+        {!isUser && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, marginLeft: 4 }}>
+            <Ionicons name="sparkles" size={11} color={BURGUNDY} style={{ marginRight: 4 }} />
+            <Text style={{ fontSize: 11, fontWeight: '600', color: BURGUNDY }}>Claude</Text>
+          </View>
         )}
+        <View
+          style={{
+            maxWidth: '80%',
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            borderRadius: 18,
+            borderBottomRightRadius: isUser ? 4 : 18,
+            borderBottomLeftRadius: isUser ? 18 : 4,
+            backgroundColor: isUser ? BURGUNDY : '#F0EDE8',
+          }}
+        >
+          <Text style={{ color: isUser ? '#FFFFFF' : '#1E1E1E', fontSize: 15, lineHeight: 21 }}>
+            {item.content}
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 8, paddingHorizontal: 4 }}>
+          <Text style={{ fontSize: 11, color: '#B0ACA8' }}>{item.timestamp.toLocaleTimeString()}</Text>
+          {item.role === 'assistant' && documentId && (
+            <TouchableOpacity
+              style={{
+                backgroundColor: 'rgba(151,27,47,0.08)',
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 6,
+              }}
+              onPress={() => handleApply(item.content)}
+              disabled={updateDocument.isPending}
+            >
+              <Text style={{ fontSize: 11, fontWeight: '600', color: BURGUNDY }}>
+                {updateDocument.isPending ? 'Applying...' : 'Apply to document'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   // ── Main render ─────────────────────────────────────────────────────────
 
   return (
     <KeyboardAvoidingView
-      className="flex-1 bg-white"
+      style={{ flex: 1, backgroundColor: CREAM_BG }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
       {/* Document context banner */}
       {hasDocumentContext && (
-        <View className="flex-row items-center justify-between bg-primary-50 px-4 py-2.5 border-b border-primary-100">
-          <View className="flex-1 mr-2">
-            <Text className="text-xs text-primary-400 font-medium">EDITING</Text>
-            <Text className="text-sm font-semibold text-primary" numberOfLines={1}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: 'rgba(151,27,47,0.06)',
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+            borderBottomWidth: 0.5,
+            borderBottomColor: '#E5E1DC',
+          }}
+        >
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Text style={{ fontSize: 10, color: BURGUNDY, fontWeight: '600', letterSpacing: 0.5 }}>EDITING</Text>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1E1E1E' }} numberOfLines={1}>
               {docData?.title || 'Untitled Document'}
             </Text>
           </View>
           <TouchableOpacity
-            className="bg-primary-100 rounded-full w-6 h-6 items-center justify-center"
+            style={{
+              backgroundColor: 'rgba(151,27,47,0.1)',
+              borderRadius: 12,
+              width: 24,
+              height: 24,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
             onPress={() => setContextDismissed(true)}
             accessibilityLabel="Dismiss document context"
           >
-            <Text className="text-primary text-xs font-bold">✕</Text>
+            <Ionicons name="close" size={14} color={BURGUNDY} />
           </TouchableOpacity>
         </View>
       )}
 
       {/* Message list or empty state */}
       {messages.length === 0 ? (
-        <View className="flex-1 justify-center items-center p-6">
-          <Text className="text-2xl font-bold mb-2">Chat with Claude</Text>
-          <Text className="text-gray-600 text-center">
-            Ask Claude to help you create or edit documents
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <Ionicons name="chatbubble-ellipses-outline" size={56} color="#D5D1CC" style={{ marginBottom: 16 }} />
+          <Text style={{ fontSize: 22, fontWeight: '700', color: '#1E1E1E', marginBottom: 6 }}>Chat with Claude</Text>
+          <Text style={{ fontSize: 15, color: '#7A7672', textAlign: 'center', lineHeight: 22 }}>
+            Your scholarly writing partner — ask for help{'\n'}creating, editing, or refining your work
           </Text>
           {hasDocumentContext && (
-            <Text className="text-sm text-gray-500 mt-4 text-center">
-              Claude has access to your current document and can make edits
-            </Text>
+            <View style={{ marginTop: 16, backgroundColor: 'rgba(151,27,47,0.06)', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 }}>
+              <Text style={{ fontSize: 13, color: '#7A7672', textAlign: 'center' }}>
+                Claude has access to your current document and can make edits
+              </Text>
+            </View>
           )}
         </View>
       ) : (
@@ -197,26 +244,27 @@ export default function ClaudeChatScreen() {
           data={messages}
           renderItem={renderMessage}
           keyExtractor={(item) => item.id}
-          className="flex-1 p-4"
+          contentContainerStyle={{ padding: 16 }}
+          style={{ flex: 1 }}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
         />
       )}
 
       {/* Document preview (collapsible) */}
       {hasDocumentContext && docData?.markdown && (
-        <View className="border-t border-gray-100">
+        <View style={{ borderTopWidth: 0.5, borderTopColor: '#E5E1DC' }}>
           <TouchableOpacity
-            className="flex-row items-center justify-between px-4 py-2 bg-gray-50"
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#F7F5F2' }}
             onPress={() => setShowDocPreview((v) => !v)}
           >
-            <Text className="text-xs font-medium text-gray-500">
+            <Text style={{ fontSize: 12, fontWeight: '500', color: '#9E9A96' }}>
               Document preview
             </Text>
-            <Text className="text-xs text-gray-400">{showDocPreview ? '▲' : '▼'}</Text>
+            <Ionicons name={showDocPreview ? 'chevron-up' : 'chevron-down'} size={14} color="#9E9A96" />
           </TouchableOpacity>
           {showDocPreview && (
-            <ScrollView className="max-h-32 px-4 py-2 bg-gray-50">
-              <Text className="text-xs text-gray-600 leading-4" numberOfLines={20}>
+            <ScrollView style={{ maxHeight: 128, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#F7F5F2' }}>
+              <Text style={{ fontSize: 12, color: '#7A7672', lineHeight: 18 }} numberOfLines={20}>
                 {docData.markdown}
               </Text>
             </ScrollView>
@@ -229,18 +277,24 @@ export default function ClaudeChatScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 6 }}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 8 }}
           keyboardShouldPersistTaps="always"
-          className="border-t border-gray-100"
+          style={{ borderTopWidth: 0.5, borderTopColor: '#E5E1DC' }}
         >
           {DOCUMENT_QUICK_ACTIONS.map((action) => (
             <TouchableOpacity
               key={action.label}
-              className="bg-primary/10 px-3 py-1.5 rounded-full mr-2"
+              style={{
+                backgroundColor: 'rgba(151,27,47,0.08)',
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderRadius: 20,
+                marginRight: 8,
+              }}
               onPress={() => sendMessage(action.prompt)}
               disabled={claudePrompt.isPending}
             >
-              <Text className="text-sm text-primary font-medium">{action.label}</Text>
+              <Text style={{ fontSize: 13, color: BURGUNDY, fontWeight: '500' }}>{action.label}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -251,27 +305,53 @@ export default function ClaudeChatScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 6 }}
+          contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 8 }}
           keyboardShouldPersistTaps="always"
         >
           {['Help me write a draft', 'Brainstorm ideas', 'Create an outline'].map((text) => (
             <TouchableOpacity
               key={text}
-              className="bg-gray-100 px-3 py-2 rounded-full mr-2"
+              style={{
+                backgroundColor: '#F0EDE8',
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderRadius: 20,
+                marginRight: 8,
+              }}
               onPress={() => setInputText(text)}
             >
-              <Text className="text-sm">{text}</Text>
+              <Text style={{ fontSize: 13, color: '#5A5652' }}>{text}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       )}
 
       {/* Input area */}
-      <View className="border-t border-gray-200 p-4">
-        <View className="flex-row items-center">
+      <View
+        style={{
+          borderTopWidth: 0.5,
+          borderTopColor: '#E5E1DC',
+          backgroundColor: '#FFFFFF',
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
           <TextInput
-            className="flex-1 border border-gray-300 rounded-full px-4 py-2 mr-2"
+            style={{
+              flex: 1,
+              backgroundColor: '#F7F5F2',
+              borderRadius: 22,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              paddingRight: 12,
+              fontSize: 15,
+              color: '#1E1E1E',
+              maxHeight: 100,
+              marginRight: 10,
+            }}
             placeholder={hasDocumentContext ? 'Ask about this document...' : 'Ask Claude...'}
+            placeholderTextColor="#B0ACA8"
             value={inputText}
             onChangeText={setInputText}
             onSubmitEditing={() => sendMessage()}
@@ -280,16 +360,22 @@ export default function ClaudeChatScreen() {
             maxLength={2000}
           />
           <TouchableOpacity
-            className={`bg-primary rounded-full w-10 h-10 items-center justify-center ${
-              claudePrompt.isPending || !inputText.trim() ? 'opacity-50' : ''
-            }`}
+            style={{
+              backgroundColor: BURGUNDY,
+              borderRadius: 22,
+              width: 44,
+              height: 44,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: claudePrompt.isPending || !inputText.trim() ? 0.4 : 1,
+            }}
             onPress={() => sendMessage()}
             disabled={claudePrompt.isPending || !inputText.trim()}
           >
             {claudePrompt.isPending ? (
               <ActivityIndicator size="small" color="white" />
             ) : (
-              <Text className="text-white text-lg">→</Text>
+              <Ionicons name="send" size={18} color="#FFFFFF" />
             )}
           </TouchableOpacity>
         </View>

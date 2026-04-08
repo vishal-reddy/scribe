@@ -9,8 +9,10 @@ import {
   Share,
   ScrollView,
   KeyboardAvoidingView,
+  ActionSheetIOS,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useDocument } from '../../lib/hooks/use-documents';
 import { useYjsDocument } from '../../lib/hooks/use-yjs-document';
 import { useCollaboration } from '../../lib/hooks/use-collaboration';
@@ -22,6 +24,9 @@ import { documentsService } from '../../lib/services/documents';
 
 // Use BlockNote on web, MarkdownEditor on mobile (for now)
 const USE_BLOCKNOTE = Platform.OS === 'web';
+
+const BURGUNDY = '#971B2F';
+const CREAM_BG = '#FAFAF7';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -203,6 +208,33 @@ export default function DocumentEditorScreen() {
     }
   };
 
+  const handleOverflowMenu = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Save Version', 'Export', 'Share', 'History', 'Ask Claude', 'Cancel'],
+          cancelButtonIndex: 5,
+        },
+        (index) => {
+          if (index === 0) handleSave();
+          else if (index === 1) handleExport();
+          else if (index === 2) handleShare();
+          else if (index === 3) router.push(`/history/${documentId}`);
+          else if (index === 4) router.push(`/claude?documentId=${documentId}`);
+        }
+      );
+    } else {
+      Alert.alert('Actions', undefined, [
+        { text: 'Save Version', onPress: handleSave },
+        { text: 'Export', onPress: handleExport },
+        { text: 'Share', onPress: handleShare },
+        { text: 'History', onPress: () => router.push(`/history/${documentId}`) },
+        { text: 'Ask Claude', onPress: () => router.push(`/claude?documentId=${documentId}`) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  };
+
   const handleFormat = useCallback((action: FormatAction) => {
     if (!USE_BLOCKNOTE && markdownEditorRef.current) {
       markdownEditorRef.current.insertAtCursor(action.before, action.after);
@@ -213,8 +245,8 @@ export default function DocumentEditorScreen() {
 
   if (isLoading) {
     return (
-      <View className="flex-1 justify-center items-center">
-        <ActivityIndicator size="large" color="#971B2F" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CREAM_BG }}>
+        <ActivityIndicator size="large" color={BURGUNDY} />
       </View>
     );
   }
@@ -223,100 +255,85 @@ export default function DocumentEditorScreen() {
 
   return (
     <KeyboardAvoidingView
-      className="flex-1 bg-white"
+      style={{ flex: 1, backgroundColor: CREAM_BG }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       {/* Claude editing banner */}
       <ClaudeEditingBanner visible={isClaudeEditing} onDismiss={dismissClaudeEditing} />
 
-      {/* Header */}
-      <View className="p-4 border-b border-gray-200">
-        <View className="flex-row justify-between items-center mb-2">
-          <Text className="text-lg font-bold flex-1" numberOfLines={1}>
+      {/* Clean minimal header */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          backgroundColor: '#FFFFFF',
+          borderBottomWidth: 0.5,
+          borderBottomColor: '#E5E1DC',
+        }}
+      >
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ padding: 6 }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="arrow-back" size={22} color="#1E1E1E" />
+        </TouchableOpacity>
+
+        <View style={{ flex: 1, alignItems: 'center', marginHorizontal: 12 }}>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: '#1E1E1E' }} numberOfLines={1}>
             {docData?.title || 'Untitled'}
           </Text>
-          <View className="flex-row gap-2">
-            <TouchableOpacity
-              className={`px-3 py-2 rounded-lg ${isSaving ? 'bg-gray-300' : 'bg-primary'}`}
-              onPress={handleSave}
-              disabled={isSaving}
-            >
-              <Text className="text-white text-sm font-medium">
-                {isSaving ? 'Saving...' : 'Save'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              className={`px-3 py-2 rounded-lg ${isExporting ? 'bg-gray-300' : 'bg-primary-600'}`}
-              onPress={handleExport}
-              disabled={isExporting}
-            >
-              <Text className="text-white text-sm font-medium">
-                {isExporting ? 'Exporting...' : 'Export'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              className="bg-primary-700 px-3 py-2 rounded-lg"
-              onPress={handleShare}
-            >
-              <Text className="text-white text-sm font-medium">Share</Text>
-            </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+            <SyncStatus
+              isSynced={isConnected}
+              lastSynced={undefined}
+              lastEditor={lastEditor}
+              collaboratorCount={collaboratorCount}
+            />
           </View>
         </View>
 
-        {/* Secondary Actions */}
-        <View className="flex-row gap-2 mb-2">
-          <TouchableOpacity
-            className="bg-primary px-4 py-2 rounded-lg"
-            onPress={() => router.push(`/claude?documentId=${documentId}`)}
-          >
-            <Text className="text-white text-sm font-medium">Ask Claude</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            className="bg-gray-200 px-3 py-2 rounded-lg"
-            onPress={() => router.push(`/history/${documentId}`)}
-          >
-            <Text className="text-sm">History</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Sync / save status */}
-        <View className="flex-row items-center justify-between">
-          <SyncStatus
-            isSynced={isConnected}
-            lastSynced={undefined}
-            lastEditor={lastEditor}
-            collaboratorCount={collaboratorCount}
-          />
-          <Text className="text-xs text-gray-400">
-            {isConnected
-              ? lastSavedAt
-                ? `Saved ${relativeTime}`
-                : 'Saved'
-              : 'Saving...'}
-          </Text>
-        </View>
+        <TouchableOpacity
+          onPress={handleOverflowMenu}
+          style={{ padding: 6 }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="ellipsis-horizontal" size={22} color="#1E1E1E" />
+        </TouchableOpacity>
       </View>
 
       {/* Formatting toolbar */}
       {!USE_BLOCKNOTE && (
-        <View className="border-b border-gray-100 bg-gray-50">
+        <View style={{ backgroundColor: '#F7F5F2', borderBottomWidth: 0.5, borderBottomColor: '#E5E1DC' }}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 6 }}
+            contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 8 }}
             keyboardShouldPersistTaps="always"
           >
             {FORMAT_ACTIONS.map((action) => (
               <TouchableOpacity
                 key={action.label}
-                className="bg-white border border-gray-200 rounded-md px-3 py-1.5 mr-2"
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 8,
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  marginRight: 6,
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.04,
+                  shadowRadius: 2,
+                  elevation: 1,
+                }}
                 onPress={() => handleFormat(action)}
                 accessibilityLabel={action.label}
               >
-                <Text className="text-sm font-semibold text-primary">{action.icon}</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: BURGUNDY }}>{action.icon}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -340,9 +357,28 @@ export default function DocumentEditorScreen() {
       )}
 
       {/* Footer status bar */}
-      <View className="flex-row items-center justify-between px-4 py-2 border-t border-gray-100 bg-gray-50">
-        <Text className="text-xs text-gray-400">{wordCount} {wordCount === 1 ? 'word' : 'words'}</Text>
-        <Text className="text-xs text-gray-400">Markdown</Text>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: 16,
+          paddingVertical: 8,
+          backgroundColor: '#F7F5F2',
+          borderTopWidth: 0.5,
+          borderTopColor: '#E5E1DC',
+        }}
+      >
+        <Text style={{ fontSize: 12, color: '#9E9A96' }}>
+          {wordCount} {wordCount === 1 ? 'word' : 'words'}
+        </Text>
+        <Text style={{ fontSize: 12, color: '#9E9A96' }}>
+          {isConnected
+            ? lastSavedAt
+              ? `Saved ${relativeTime}`
+              : 'Synced'
+            : 'Saving...'}
+        </Text>
       </View>
     </KeyboardAvoidingView>
   );

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, Animated } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import type { Document } from '../lib/services/documents';
 
 interface DocumentCardProps {
@@ -8,6 +9,8 @@ interface DocumentCardProps {
   onLongPress: () => void;
   isClaudeEditing?: boolean;
 }
+
+const BURGUNDY = '#971B2F';
 
 export default function DocumentCard({
   document,
@@ -21,7 +24,7 @@ export default function DocumentCard({
     if (isClaudeEditing) {
       const pulse = Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 0.92, duration: 800, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 0.97, duration: 800, useNativeDriver: true }),
           Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
         ])
       );
@@ -33,57 +36,103 @@ export default function DocumentCard({
   }, [isClaudeEditing, pulseAnim]);
 
   const isClaudeEdited = document.lastEditedBy === 'claude';
-  const borderColor = isClaudeEditing
-    ? '#625B71'
-    : isClaudeEdited
-      ? '#CCC2DC'
-      : '#E5E7EB';
+  const previewText = document.markdown
+    .replace(/^#+\s+/gm, '')
+    .substring(0, 120);
 
   return (
     <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
       <TouchableOpacity
-        className="bg-white p-4 mb-2 rounded-lg"
-        style={{ borderWidth: 1, borderColor }}
         onPress={onPress}
         onLongPress={onLongPress}
+        activeOpacity={0.7}
+        style={{
+          flexDirection: 'row',
+          backgroundColor: '#FFFFFF',
+          borderRadius: 14,
+          marginBottom: 12,
+          overflow: 'hidden',
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+          elevation: 3,
+        }}
       >
-        <View className="flex-row items-center mb-2">
-          <Text className="font-bold text-lg flex-1" numberOfLines={1}>
-            {document.title}
-          </Text>
-          {isClaudeEditing && (
-            <View
-              style={{ backgroundColor: '#625B71' }}
-              className="px-2 py-0.5 rounded-full ml-2"
+        {/* Left accent bar for claude-edited docs */}
+        {(isClaudeEdited || isClaudeEditing) && (
+          <View
+            style={{
+              width: 4,
+              backgroundColor: isClaudeEditing ? '#625B71' : BURGUNDY,
+            }}
+          />
+        )}
+
+        <View style={{ flex: 1, padding: 16 }}>
+          {/* Title row */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+            <Text
+              style={{ flex: 1, fontSize: 17, fontWeight: '700', color: '#1E1E1E' }}
+              numberOfLines={1}
             >
-              <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '600' }}>
-                ✨ Editing…
+              {document.title}
+            </Text>
+            {isClaudeEditing && (
+              <View
+                style={{
+                  backgroundColor: '#625B71',
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 12,
+                  marginLeft: 8,
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '600' }}>
+                  ✨ Editing…
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Preview text */}
+          <Text
+            style={{ fontSize: 14, color: '#7A7672', lineHeight: 20, marginBottom: 10 }}
+            numberOfLines={2}
+          >
+            {previewText}...
+          </Text>
+
+          {/* Metadata row */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name="time-outline" size={12} color="#B0ACA8" style={{ marginRight: 4 }} />
+              <Text style={{ fontSize: 12, color: '#B0ACA8' }}>
+                {new Date(document.updatedAt).toLocaleDateString()}
               </Text>
             </View>
-          )}
+
+            {isClaudeEdited && !isClaudeEditing && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(151,27,47,0.08)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                <Ionicons name="sparkles" size={11} color={BURGUNDY} style={{ marginRight: 3 }} />
+                <Text style={{ fontSize: 11, color: BURGUNDY, fontWeight: '600' }}>
+                  Claude
+                </Text>
+              </View>
+            )}
+
+            {!isClaudeEdited && (
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="person-outline" size={12} color="#B0ACA8" style={{ marginRight: 4 }} />
+                <Text style={{ fontSize: 12, color: '#B0ACA8' }}>You</Text>
+              </View>
+            )}
+          </View>
         </View>
 
-        <Text className="text-gray-600 mb-2" numberOfLines={2}>
-          {document.markdown.substring(0, 100)}...
-        </Text>
-
-        <View className="flex-row justify-between items-center">
-          <Text className="text-xs text-gray-400">
-            {new Date(document.updatedAt).toLocaleDateString()}
-          </Text>
-
-          {isClaudeEdited && !isClaudeEditing && (
-            <View className="flex-row items-center" style={{ backgroundColor: '#F3E8FF', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-              <Text style={{ fontSize: 10 }}>✨</Text>
-              <Text style={{ fontSize: 11, color: '#625B71', fontWeight: '600', marginLeft: 2 }}>
-                Claude
-              </Text>
-            </View>
-          )}
-
-          {!isClaudeEdited && (
-            <Text className="text-xs text-gray-400">You</Text>
-          )}
+        {/* Chevron */}
+        <View style={{ justifyContent: 'center', paddingRight: 12 }}>
+          <Ionicons name="chevron-forward" size={18} color="#D5D1CC" />
         </View>
       </TouchableOpacity>
     </Animated.View>

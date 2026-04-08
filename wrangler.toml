@@ -24,11 +24,7 @@ class_name = "ScribeMCP"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["DocumentSync"]
-
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["ScribeMCP"]
+new_sqlite_classes = ["DocumentSync", "ScribeMCP"]
 
 [[d1_databases]]
 binding = "DB"

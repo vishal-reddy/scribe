@@ -9,6 +9,7 @@ A modern, real-time collaborative markdown editor powered by Claude AI, built fo
 
 ## 📖 Table of Contents
 
+- [For Users](#for-users)
 - [Overview](#overview)
 - [Features](#features)
 - [Architecture](#architecture)
@@ -24,6 +25,23 @@ A modern, real-time collaborative markdown editor powered by Claude AI, built fo
 - [Documentation](#documentation)
 - [Contributing](#contributing)
 - [License](#license)
+
+## For Users
+
+### Quick Start
+1. Visit the app URL or install the mobile app
+2. Sign up with your email — you'll receive a 6-digit verification code
+3. Start creating documents with the Notion-like editor
+4. Use the Claude tab for AI writing assistance
+
+See [Getting Started Guide](docs/getting-started.md) for detailed instructions.
+
+### Security
+Scribe uses passwordless email verification (OTP). Your documents are private and isolated to your account — no one else can access them.
+
+See [Security Documentation](docs/security.md) for details.
+
+---
 
 ## Overview
 
@@ -42,7 +60,7 @@ Just as Thomas Aquinas served as a bridge between faith and reason, synthesizing
 - **🌍 Edge-first Architecture**: Powered by Cloudflare Workers for global low-latency access from anywhere
 - **📱 Cross-platform**: Built with Expo and React Native - runs on iOS, Android, and Web
 - **🔄 Version History**: Automatic snapshots and full audit trail of all edits
-- **🔒 Secure by Default**: JWT-based authentication with Cloudflare Access support
+- **🔒 Secure by Default**: Passwordless OTP authentication with Cloudflare Access support
 - **📊 MCP Integration**: Model Context Protocol server for advanced Claude interactions
 
 ### 🎯 Advanced Features
@@ -387,10 +405,12 @@ For complete API documentation with request/response examples, see [docs/API.md]
 
 ## Documentation
 
+- **[Getting Started](docs/getting-started.md)** - New user guide (sign up, writing, Claude)
+- **[Security](docs/security.md)** - Authentication, data isolation, infrastructure
+- **[API Quick Reference](docs/api-reference.md)** - Developer API overview
 - **[API Reference](docs/API.md)** - Complete API endpoint documentation
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - System design and data flow
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment instructions
-- **[User Guide](docs/USER_GUIDE.md)** - End-user documentation
 - **[Mobile App README](mobile/README.md)** - Frontend-specific documentation
 - **[Contributing Guidelines](CONTRIBUTING.md)** - How to contribute
 - **[Code of Conduct](CODE_OF_CONDUCT.md)** - Community guidelines

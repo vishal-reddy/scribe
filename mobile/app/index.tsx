@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -30,11 +30,30 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState('');
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   // Fetch documents
   const { data, isLoading, isError, error, refetch } = useDocuments();
   const createMutation = useCreateDocument();
   const deleteMutation = useDeleteDocument();
+
+  // Raw connectivity test
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8787';
+    const apiKey = process.env.EXPO_PUBLIC_API_KEY || '';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    
+    fetch(`${apiUrl}/api/documents`, { headers })
+      .then(async (resp) => {
+        const text = await resp.text();
+        setDebugInfo(`Status: ${resp.status} | Body: ${text.slice(0, 100)}...`);
+      })
+      .catch((err) => {
+        setDebugInfo(`Fetch error: ${err.message}`);
+      });
+  }, [isAuthenticated]);
 
   // Redirect if not authenticated
   React.useEffect(() => {
@@ -88,11 +107,20 @@ export default function HomeScreen() {
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CREAM_BG }}>
         <ActivityIndicator size="large" color={BURGUNDY} />
         <Text style={{ marginTop: 16, color: '#7A7672', fontSize: 14 }}>Loading...</Text>
+        {debugInfo && (
+          <Text style={{ fontSize: 11, color: '#999', marginTop: 12, textAlign: 'center', paddingHorizontal: 20 }}>
+            {debugInfo}
+          </Text>
+        )}
       </View>
     );
   }
 
   if (isError) {
+    const errMsg = (error as any)?.message || 'Unknown error';
+    const errCode = (error as any)?.code || (error as any)?.statusCode || '';
+    const apiUrl = process.env.EXPO_PUBLIC_API_URL || '(not set)';
+    const hasKey = !!process.env.EXPO_PUBLIC_API_KEY;
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CREAM_BG, padding: 24 }}>
         <Ionicons name="cloud-offline-outline" size={56} color="#D5D1CC" style={{ marginBottom: 16 }} />
@@ -100,8 +128,16 @@ export default function HomeScreen() {
           Failed to load documents
         </Text>
         <Text style={{ fontSize: 14, color: '#B0ACA8', marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
-          {(error as any)?.message || 'Check your connection and try again'}
+          {errCode ? `[${errCode}] ` : ''}{errMsg}
         </Text>
+        <Text style={{ fontSize: 11, color: '#CCC', marginTop: 12, textAlign: 'center' }}>
+          API: {apiUrl} | Key: {hasKey ? 'yes' : 'NO'}
+        </Text>
+        {debugInfo && (
+          <Text style={{ fontSize: 11, color: '#999', marginTop: 8, textAlign: 'center' }}>
+            Raw: {debugInfo}
+          </Text>
+        )}
         <TouchableOpacity
           style={{
             marginTop: 20,

@@ -1,5 +1,19 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import apiClient from '../api-client';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8787';
+const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
+
+function getHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (API_KEY) headers['X-API-Key'] = API_KEY;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const email = localStorage.getItem('user_email');
+      if (email) headers['X-User-Email'] = email;
+    }
+  } catch {}
+  return headers;
+}
 
 /**
  * Document sync hook — polls the REST API for content.
@@ -17,7 +31,11 @@ export function useYjsDocument(documentId: string) {
     // Skip polling while user has unsaved edits or save is in progress
     if (!documentId || isSavingRef.current || isDirtyRef.current) return;
     try {
-      const { data } = await apiClient.get(`/api/documents/${documentId}`);
+      const resp = await fetch(`${API_URL}/api/documents/${documentId}`, {
+        headers: getHeaders(),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
       const serverMarkdown = data.document?.markdown || '';
       // Only update if content differs from what we have
       if (serverMarkdown !== contentRef.current) {
@@ -61,8 +79,10 @@ export function useYjsDocument(documentId: string) {
         if (!documentId) return;
         isSavingRef.current = true;
         try {
-          await apiClient.patch(`/api/documents/${documentId}`, {
-            markdown: newMarkdown,
+          await fetch(`${API_URL}/api/documents/${documentId}`, {
+            method: 'PATCH',
+            headers: getHeaders(),
+            body: JSON.stringify({ markdown: newMarkdown }),
           });
           setIsConnected(true);
         } catch (error) {

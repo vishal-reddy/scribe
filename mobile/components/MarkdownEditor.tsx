@@ -74,17 +74,25 @@ const MarkdownEditor = React.forwardRef<MarkdownEditorRef, MarkdownEditorProps>(
   }));
 
   return (
-    <View className="flex-1 p-4">
+    <View style={{ flex: 1, padding: 16 }}>
       <TextInput
         ref={inputRef}
-        className="flex-1 text-base"
-        style={{ fontFamily: 'System' }}
+        style={{
+          flex: 1,
+          fontSize: 16,
+          lineHeight: 24,
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+          color: '#1E1E1E',
+          textAlignVertical: 'top',
+          padding: 0,
+        }}
         value={content}
         onChangeText={handleChange}
         onSelectionChange={handleSelectionChange}
         multiline
         editable={editable}
         placeholder="Start writing..."
+        placeholderTextColor="#B0ACA8"
         textAlignVertical="top"
       />
     </View>

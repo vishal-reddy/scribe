@@ -7,7 +7,6 @@ import {
   Platform,
   Alert,
   Share,
-  ScrollView,
   KeyboardAvoidingView,
   ActionSheetIOS,
 } from 'react-native';
@@ -16,14 +15,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useDocument } from '../../lib/hooks/use-documents';
 import { useYjsDocument } from '../../lib/hooks/use-yjs-document';
 import { useCollaboration } from '../../lib/hooks/use-collaboration';
-import BlockNoteEditor, { BlockNoteEditorRef } from '../../components/BlockNoteEditor';
-import MarkdownEditor, { MarkdownEditorRef } from '../../components/MarkdownEditor';
+import NotionEditor, { NotionEditorRef } from '../../components/NotionEditor';
 import SyncStatus from '../../components/SyncStatus';
 import ClaudeEditingBanner from '../../components/ClaudeEditingBanner';
 import { documentsService } from '../../lib/services/documents';
-
-// Use MarkdownEditor on all platforms for now (BlockNote via WebView is unreliable)
-const USE_BLOCKNOTE = false;
 
 const BURGUNDY = '#971B2F';
 const CREAM_BG = '#FAFAF7';
@@ -45,35 +40,13 @@ function countWords(text: string): number {
   return text.trim() ? text.trim().split(/\s+/).length : 0;
 }
 
-// ─── Formatting toolbar items ─────────────────────────────────────────────
-
-interface FormatAction {
-  label: string;
-  icon: string;
-  before: string;
-  after: string;
-}
-
-const FORMAT_ACTIONS: FormatAction[] = [
-  { label: 'Bold',       icon: 'B',   before: '**',          after: '**' },
-  { label: 'Italic',     icon: 'I',   before: '*',           after: '*' },
-  { label: 'H1',         icon: 'H1',  before: '# ',          after: '' },
-  { label: 'H2',         icon: 'H2',  before: '## ',         after: '' },
-  { label: 'H3',         icon: 'H3',  before: '### ',        after: '' },
-  { label: 'Bullet',     icon: '•',   before: '- ',          after: '' },
-  { label: 'Numbered',   icon: '1.',  before: '1. ',         after: '' },
-  { label: 'Code',       icon: '</>',  before: '```\n',       after: '\n```' },
-  { label: 'Link',       icon: '🔗',  before: '[',           after: '](url)' },
-];
-
 // ─── Screen ───────────────────────────────────────────────────────────────
 
 export default function DocumentEditorScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const documentId = Array.isArray(id) ? id[0] : id;
-  const blockNoteRef = useRef<BlockNoteEditorRef>(null);
-  const markdownEditorRef = useRef<MarkdownEditorRef>(null);
+  const blockNoteRef = useRef<NotionEditorRef>(null);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -147,11 +120,7 @@ export default function DocumentEditorScreen() {
   const handleExport = async () => {
     setIsExporting(true);
     try {
-      let markdownContent = markdown;
-
-      if (USE_BLOCKNOTE && blockNoteRef.current) {
-        markdownContent = await blockNoteRef.current.exportMarkdown();
-      }
+      const markdownContent = blockNoteRef.current?.getContent() || markdown;
 
       if (Platform.OS === 'web') {
         const blob = new Blob([markdownContent], { type: 'text/markdown' });
@@ -181,11 +150,7 @@ export default function DocumentEditorScreen() {
 
   const handleShare = async () => {
     try {
-      let markdownContent = markdown;
-
-      if (USE_BLOCKNOTE && blockNoteRef.current) {
-        markdownContent = await blockNoteRef.current.exportMarkdown();
-      }
+      const markdownContent = blockNoteRef.current?.getContent() || markdown;
 
       if (Platform.OS === 'web') {
         if (navigator.share) {
@@ -234,12 +199,6 @@ export default function DocumentEditorScreen() {
       ]);
     }
   };
-
-  const handleFormat = useCallback((action: FormatAction) => {
-    if (!USE_BLOCKNOTE && markdownEditorRef.current) {
-      markdownEditorRef.current.insertAtCursor(action.before, action.after);
-    }
-  }, []);
 
   // ── Loading state ───────────────────────────────────────────────────────
 
@@ -306,55 +265,12 @@ export default function DocumentEditorScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Formatting toolbar */}
-      {!USE_BLOCKNOTE && (
-        <View style={{ backgroundColor: '#F7F5F2', borderBottomWidth: 0.5, borderBottomColor: '#E5E1DC' }}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 8 }}
-            keyboardShouldPersistTaps="always"
-          >
-            {FORMAT_ACTIONS.map((action) => (
-              <TouchableOpacity
-                key={action.label}
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  borderRadius: 8,
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  marginRight: 6,
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.04,
-                  shadowRadius: 2,
-                  elevation: 1,
-                }}
-                onPress={() => handleFormat(action)}
-                accessibilityLabel={action.label}
-              >
-                <Text style={{ fontSize: 13, fontWeight: '600', color: BURGUNDY }}>{action.icon}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* Editor */}
-      {USE_BLOCKNOTE ? (
-        <BlockNoteEditor
-          ref={blockNoteRef}
-          initialContent={markdown}
-          onContentChange={handleContentChange}
-          ydoc={ydoc}
-        />
-      ) : (
-        <MarkdownEditor
-          ref={markdownEditorRef}
-          initialContent={markdown}
-          onContentChange={handleContentChange}
-        />
-      )}
+      {/* Notion-style block editor */}
+      <NotionEditor
+        ref={blockNoteRef}
+        initialContent={markdown}
+        onContentChange={handleContentChange}
+      />
 
       {/* Footer status bar */}
       <View

@@ -10,6 +10,7 @@ export interface Env {
   CF_ACCESS_AUDIENCE?: string;
   ANTHROPIC_API_KEY?: string;
   MCP_AUTH_TOKEN?: string;
+  SCRIBE_API_KEY?: string;
   SENTRY_DSN?: string;
   ENVIRONMENT?: string;
   ALLOWED_ORIGINS?: string;

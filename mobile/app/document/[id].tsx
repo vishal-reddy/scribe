@@ -22,8 +22,8 @@ import SyncStatus from '../../components/SyncStatus';
 import ClaudeEditingBanner from '../../components/ClaudeEditingBanner';
 import { documentsService } from '../../lib/services/documents';
 
-// Use BlockNote on web, MarkdownEditor on mobile (for now)
-const USE_BLOCKNOTE = Platform.OS === 'web';
+// Use MarkdownEditor on all platforms for now (BlockNote via WebView is unreliable)
+const USE_BLOCKNOTE = false;
 
 const BURGUNDY = '#971B2F';
 const CREAM_BG = '#FAFAF7';

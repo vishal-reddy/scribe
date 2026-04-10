@@ -20,8 +20,7 @@ export default function LoginScreen() {
 
     setIsLoading(true);
     try {
-      const mockToken = `mock_token_${Date.now()}`;
-      await login(mockToken, email);
+      await login(email);
       router.replace('/');
     } catch (error) {
       Alert.alert('Error', 'Login failed. Please try again.');

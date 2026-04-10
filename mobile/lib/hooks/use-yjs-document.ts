@@ -1,126 +1,108 @@
-import { useEffect, useState, useRef } from 'react';
-import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import apiClient from '../api-client';
 
-const WS_URL = process.env.EXPO_PUBLIC_WS_URL || 'ws://localhost:8787';
-
+/**
+ * Document sync hook — polls the REST API for content.
+ * Y.js WebSocket sync is not used since API key auth can't be passed on WS upgrade.
+ */
 export function useYjsDocument(documentId: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [markdown, setMarkdown] = useState('');
-  const ydocRef = useRef<Y.Doc | null>(null);
-  const providerRef = useRef<WebsocketProvider | null>(null);
+  const contentRef = useRef('');
+  const isSavingRef = useRef(false);
+  const isDirtyRef = useRef(false);
+
+  // Fetch document content
+  const fetchContent = useCallback(async () => {
+    // Skip polling while user has unsaved edits or save is in progress
+    if (!documentId || isSavingRef.current || isDirtyRef.current) return;
+    try {
+      const { data } = await apiClient.get(`/api/documents/${documentId}`);
+      const serverMarkdown = data.document?.markdown || '';
+      // Only update if content differs from what we have
+      if (serverMarkdown !== contentRef.current) {
+        contentRef.current = serverMarkdown;
+        setMarkdown(serverMarkdown);
+      }
+      setIsConnected(true);
+    } catch (error) {
+      console.error('Sync fetch error:', error);
+      setIsConnected(false);
+    }
+  }, [documentId]);
 
   useEffect(() => {
     if (!documentId) return;
 
-    // Create Y.Doc
-    const ydoc = new Y.Doc();
-    ydocRef.current = ydoc;
+    // Initial fetch
+    fetchContent();
 
-    // Create WebSocket provider
-    const provider = new WebsocketProvider(
-      WS_URL,
-      `/api/sync/${documentId}/ws`,
-      ydoc
-    );
-    providerRef.current = provider;
+    // Poll every 5 seconds
+    const interval = setInterval(fetchContent, 5000);
 
-    // Listen for connection status
-    provider.on('status', (event: { status: string }) => {
-      setIsConnected(event.status === 'connected');
-    });
+    return () => clearInterval(interval);
+  }, [documentId, fetchContent]);
 
-    // Get the text content
-    const ytext = ydoc.getText('content');
+  // Save content to server (debounced)
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Listen for changes and update markdown
-    const updateHandler = () => {
-      setMarkdown(ytext.toString());
-    };
-    
-    ytext.observe(updateHandler);
+  const updateContent = useCallback(
+    (newMarkdown: string) => {
+      contentRef.current = newMarkdown;
+      setMarkdown(newMarkdown);
+      isDirtyRef.current = true;
 
-    // Cleanup
+      // Debounce saves — wait 1 second after last edit
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+
+      saveTimeoutRef.current = setTimeout(async () => {
+        if (!documentId) return;
+        isSavingRef.current = true;
+        try {
+          await apiClient.patch(`/api/documents/${documentId}`, {
+            markdown: newMarkdown,
+          });
+          setIsConnected(true);
+        } catch (error) {
+          console.error('Save error:', error);
+          setIsConnected(false);
+        } finally {
+          isSavingRef.current = false;
+          isDirtyRef.current = false;
+        }
+      }, 1000);
+    },
+    [documentId]
+  );
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
     return () => {
-      ytext.unobserve(updateHandler);
-      provider.destroy();
-      ydoc.destroy();
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
     };
-  }, [documentId]);
-
-  const updateContent = (newMarkdown: string) => {
-    if (!ydocRef.current) return;
-    
-    const ytext = ydocRef.current.getText('content');
-    
-    // Delete all content and insert new
-    ydocRef.current.transact(() => {
-      ytext.delete(0, ytext.length);
-      ytext.insert(0, newMarkdown);
-    });
-  };
+  }, []);
 
   return {
     markdown,
     isConnected,
     updateContent,
-    ydoc: ydocRef.current,
+    ydoc: null,
   };
 }
 
 /**
- * Simple Y.js hook without WebSocket (for MVP)
- * Uses polling to sync with backend
+ * Simple polling sync (kept for compatibility)
  */
 export function useSimpleYjsDocument(documentId: string) {
-  const [content, setContent] = useState('');
-  const [lastSynced, setLastSynced] = useState<Date | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  // Poll for updates every 5 seconds
-  useEffect(() => {
-    if (!documentId) return;
-
-    const fetchDocument = async () => {
-      try {
-        const response = await apiClient.get(`/api/documents/${documentId}`);
-        setContent(response.data.document.markdown || '');
-        setLastSynced(new Date());
-      } catch (error) {
-        console.error('Sync error:', error);
-      }
-    };
-
-    // Initial fetch
-    fetchDocument();
-
-    // Set up polling
-    const interval = setInterval(fetchDocument, 5000);
-
-    return () => clearInterval(interval);
-  }, [documentId]);
-
-  const updateContent = async (newContent: string) => {
-    setContent(newContent);
-    setIsSyncing(true);
-    
-    try {
-      await apiClient.patch(`/api/documents/${documentId}`, {
-        markdown: newContent,
-      });
-      setLastSynced(new Date());
-    } catch (error) {
-      console.error('Update error:', error);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
+  const { markdown, isConnected, updateContent } = useYjsDocument(documentId);
   return {
-    content,
+    content: markdown,
     updateContent,
-    lastSynced,
-    isSyncing,
+    lastSynced: isConnected ? new Date() : null,
+    isSyncing: false,
   };
 }

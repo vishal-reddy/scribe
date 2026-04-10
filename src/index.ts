@@ -27,12 +27,15 @@ app.use('*', async (c, next) => {
   const allowedRaw = c.env.ALLOWED_ORIGINS;
   const origins = allowedRaw
     ? allowedRaw.split(',').map((o) => o.trim())
-    : ['http://localhost:8081', 'http://localhost:19006', 'http://localhost:8787'];
+    : ['*'];
 
   return cors({
-    origin: origins,
+    origin: (origin) => {
+      if (origins.includes('*')) return origin || '*';
+      return origins.includes(origin) ? origin : '';
+    },
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'CF-Authorization', 'X-Request-ID'],
+    allowHeaders: ['Content-Type', 'Authorization', 'CF-Authorization', 'X-Request-ID', 'X-API-Key', 'X-User-Email'],
     exposeHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'Retry-After'],
     maxAge: 86400,
     credentials: true,

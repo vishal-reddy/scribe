@@ -2,13 +2,12 @@ import React, { useRef, useState, useCallback, useEffect, useImperativeHandle } 
 import { View, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
-import * as Y from 'yjs';
 
 interface BlockNoteEditorProps {
   initialContent?: string;
   onContentChange?: (markdown: string, blocks: any) => void;
   editable?: boolean;
-  ydoc?: Y.Doc | null;
+  ydoc?: any;
 }
 
 export interface BlockNoteEditorRef {

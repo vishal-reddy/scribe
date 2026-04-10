@@ -176,6 +176,18 @@ function parseJWTDev(token: string): JWTPayload | null {
  * - Development: simplified JWT decode (no signature verification)
  */
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
+  // API Key auth bypass — allows mobile/web clients to authenticate with a shared secret
+  const apiKey = c.req.header('X-API-Key');
+  if (apiKey && c.env.SCRIBE_API_KEY && apiKey === c.env.SCRIBE_API_KEY) {
+    const email = c.req.header('X-User-Email') || 'vishal@scribe.app';
+    const userId = await hashEmail(email);
+    c.set('userId', userId);
+    c.set('userEmail', email);
+    c.set('userName', email.split('@')[0]);
+    await next();
+    return;
+  }
+
   const cfToken = c.req.header('CF-Authorization');
   const authHeader = c.req.header('Authorization');
   const token = cfToken || authHeader?.replace('Bearer ', '');

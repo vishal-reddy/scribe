@@ -103,12 +103,24 @@ const apiClient = axios.create({
   },
 });
 
-// Request interceptor — add auth token + request ID
+// Request interceptor — add API key auth + user email + request ID
 apiClient.interceptors.request.use(
   async (config) => {
-    const token = await SecureStore.getItemAsync('auth_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // API key auth
+    const apiKey = process.env.EXPO_PUBLIC_API_KEY;
+    if (apiKey) {
+      config.headers['X-API-Key'] = apiKey;
+    }
+
+    // Send user email for identity
+    let email: string | null = null;
+    if (Platform.OS === 'web') {
+      email = localStorage.getItem('user_email');
+    } else {
+      email = await SecureStore.getItemAsync('user_email');
+    }
+    if (email) {
+      config.headers['X-User-Email'] = email;
     }
 
     // Generate a client-side request ID so logs can be correlated
@@ -128,8 +140,12 @@ apiClient.interceptors.response.use(
     const apiError = parseApiError(error);
 
     if (apiError.isAuthError) {
-      await SecureStore.deleteItemAsync('auth_token');
-      await SecureStore.deleteItemAsync('user_email');
+      // Clear stored email on auth errors
+      if (Platform.OS === 'web') {
+        localStorage.removeItem('user_email');
+      } else {
+        await SecureStore.deleteItemAsync('user_email');
+      }
     }
 
     return Promise.reject(apiError);

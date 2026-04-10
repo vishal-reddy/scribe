@@ -1,22 +1,44 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { useRouter } from 'expo-router';
+import { Platform } from 'react-native';
 
 interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
-  token: string | null;
   userEmail: string | null;
-  login: (token: string, email: string) => Promise<void>;
+  login: (email: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Web fallback for SecureStore (not available on web)
+const storage = {
+  async getItem(key: string): Promise<string | null> {
+    if (Platform.OS === 'web') {
+      return localStorage.getItem(key);
+    }
+    return SecureStore.getItemAsync(key);
+  },
+  async setItem(key: string, value: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      localStorage.setItem(key, value);
+      return;
+    }
+    return SecureStore.setItemAsync(key, value);
+  },
+  async removeItem(key: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      localStorage.removeItem(key);
+      return;
+    }
+    return SecureStore.deleteItemAsync(key);
+  },
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [token, setToken] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,11 +47,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadAuth = async () => {
     try {
-      const storedToken = await SecureStore.getItemAsync('auth_token');
-      const storedEmail = await SecureStore.getItemAsync('user_email');
-      
-      if (storedToken && storedEmail) {
-        setToken(storedToken);
+      const storedEmail = await storage.getItem('user_email');
+      if (storedEmail) {
         setUserEmail(storedEmail);
         setIsAuthenticated(true);
       }
@@ -40,11 +59,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const login = async (newToken: string, email: string) => {
+  const login = async (email: string) => {
     try {
-      await SecureStore.setItemAsync('auth_token', newToken);
-      await SecureStore.setItemAsync('user_email', email);
-      setToken(newToken);
+      await storage.setItem('user_email', email);
       setUserEmail(email);
       setIsAuthenticated(true);
     } catch (error) {
@@ -55,9 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await SecureStore.deleteItemAsync('auth_token');
-      await SecureStore.deleteItemAsync('user_email');
-      setToken(null);
+      await storage.removeItem('user_email');
       setUserEmail(null);
       setIsAuthenticated(false);
     } catch (error) {
@@ -66,7 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, token, userEmail, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, userEmail, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

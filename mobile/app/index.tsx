@@ -32,7 +32,7 @@ export default function HomeScreen() {
   const [newDocTitle, setNewDocTitle] = useState('');
 
   // Fetch documents
-  const { data, isLoading, refetch } = useDocuments();
+  const { data, isLoading, isError, error, refetch } = useDocuments();
   const createMutation = useCreateDocument();
   const deleteMutation = useDeleteDocument();
 
@@ -88,6 +88,32 @@ export default function HomeScreen() {
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CREAM_BG }}>
         <ActivityIndicator size="large" color={BURGUNDY} />
         <Text style={{ marginTop: 16, color: '#7A7672', fontSize: 14 }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (isError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: CREAM_BG, padding: 24 }}>
+        <Ionicons name="cloud-offline-outline" size={56} color="#D5D1CC" style={{ marginBottom: 16 }} />
+        <Text style={{ fontSize: 18, fontWeight: '600', color: '#7A7672', textAlign: 'center' }}>
+          Failed to load documents
+        </Text>
+        <Text style={{ fontSize: 14, color: '#B0ACA8', marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+          {(error as any)?.message || 'Check your connection and try again'}
+        </Text>
+        <TouchableOpacity
+          style={{
+            marginTop: 20,
+            backgroundColor: BURGUNDY,
+            borderRadius: 12,
+            paddingVertical: 12,
+            paddingHorizontal: 24,
+          }}
+          onPress={() => refetch()}
+        >
+          <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }

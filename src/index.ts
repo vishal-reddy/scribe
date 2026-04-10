@@ -42,23 +42,14 @@ app.use('*', async (c, next) => {
   })(c, next);
 });
 
-// Security headers with Content Security Policy
+// Security headers — disable CSP and CORP for API routes (conflicts with CORS)
 app.use(
   '*',
   secureHeaders({
-    contentSecurityPolicy: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", 'data:', 'https:'],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"],
-    },
-    crossOriginEmbedderPolicy: false, // Workers don't serve HTML directly
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: false,
   })
 );
 

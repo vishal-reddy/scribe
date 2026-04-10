@@ -1,11 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../auth-context';
 import { documentsService } from '../services/documents';
 import type { CreateDocumentInput, UpdateDocumentInput } from '../services/documents';
 
 export function useDocuments() {
+  const { isAuthenticated } = useAuth();
   return useQuery({
     queryKey: ['documents'],
     queryFn: () => documentsService.list(),
+    enabled: isAuthenticated,
   });
 }
 

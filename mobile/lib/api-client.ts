@@ -1,6 +1,10 @@
-import axios, { AxiosError } from 'axios';
-import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8787';
+const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
 
 // ─── Typed API Error ────────────────────────────────────────────────────────
 
@@ -31,12 +35,10 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
 
-  /** True when the device appears to be offline or the server is unreachable */
   get isNetworkError(): boolean {
     return this.code === 'NETWORK_ERROR';
   }
 
-  /** True for 401/403/token-expired responses */
   get isAuthError(): boolean {
     return (
       this.code === 'UNAUTHORIZED' ||
@@ -46,110 +48,160 @@ export class ApiError extends Error {
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Storage helper ─────────────────────────────────────────────────────────
 
-function isNetworkError(error: AxiosError): boolean {
-  if (!error.response && error.code === 'ERR_NETWORK') return true;
-  if (error.message === 'Network Error') return true;
-  if (error.code === 'ECONNABORTED') return true;
-  return false;
+function getStoredEmail(): string | null {
+  try {
+    if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      return localStorage.getItem('user_email');
+    }
+  } catch {}
+  return null;
+}
+
+// ─── Core fetch wrapper ─────────────────────────────────────────────────────
+
+async function buildHeaders(
+  extra?: Record<string, string>
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...extra,
+  };
+
+  // API key auth
+  if (API_KEY) {
+    headers['X-API-Key'] = API_KEY;
+  }
+
+  // User identity
+  let email: string | null = getStoredEmail();
+  if (!email && Platform.OS !== 'web') {
+    try {
+      email = await SecureStore.getItemAsync('user_email');
+    } catch {}
+  }
+  if (email) {
+    headers['X-User-Email'] = email;
+  }
+
+  // Request correlation
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    headers['X-Request-ID'] = crypto.randomUUID();
+  }
+
+  return headers;
+}
+
+function parseErrorBody(body: any): { code?: string; message?: string; details?: unknown; requestId?: string } {
+  if (typeof body === 'object' && body?.error) {
+    if (typeof body.error === 'string') return { message: body.error };
+    return body.error;
+  }
+  return {};
+}
+
+function statusToCode(status: number): ApiErrorCode {
+  switch (status) {
+    case 400: return 'VALIDATION_ERROR';
+    case 401: return 'UNAUTHORIZED';
+    case 403: return 'FORBIDDEN';
+    case 404: return 'NOT_FOUND';
+    case 409: return 'CONFLICT';
+    case 429: return 'RATE_LIMIT_EXCEEDED';
+    default: return 'INTERNAL_ERROR';
+  }
 }
 
 /**
- * Parse the backend's structured error envelope into an ApiError.
- * Falls back to generic values when the response shape is unexpected.
+ * Type-safe API client using native fetch.
+ * Automatically injects API key, user email, and request ID headers.
  */
-function parseApiError(error: AxiosError): ApiError {
-  // Timeout
-  if (error.code === 'ECONNABORTED') {
-    return new ApiError('TIMEOUT', 0, 'Request timed out. Please try again.');
+async function apiFetch<T = any>(
+  path: string,
+  options: RequestInit & { params?: Record<string, string | number> } = {}
+): Promise<T> {
+  const { params, headers: extraHeaders, ...fetchOptions } = options;
+
+  // Build URL with query params
+  let url = `${API_URL}${path}`;
+  if (params) {
+    const qs = new URLSearchParams(
+      Object.entries(params).map(([k, v]) => [k, String(v)])
+    ).toString();
+    url += `?${qs}`;
   }
 
-  // Offline / unreachable
-  if (isNetworkError(error)) {
-    return new ApiError(
+  const headers = await buildHeaders(extraHeaders as Record<string, string>);
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, { ...fetchOptions, headers });
+  } catch (err: any) {
+    throw new ApiError(
       'NETWORK_ERROR',
       0,
-      'Unable to reach the server. Please check your connection.'
+      err.message === 'Failed to fetch'
+        ? 'Unable to reach the server. Please check your connection.'
+        : err.message || 'Network error'
     );
   }
 
-  // Server responded with an error payload
-  const status = error.response?.status ?? 500;
-  const data = error.response?.data as
-    | { error?: { code?: string; message?: string; details?: unknown; requestId?: string } }
-    | undefined;
+  if (!resp.ok) {
+    let body: any = {};
+    try {
+      body = await resp.json();
+    } catch {
+      try {
+        body = { error: { message: await resp.text() } };
+      } catch {}
+    }
 
-  const body = data?.error;
+    const parsed = parseErrorBody(body);
 
-  return new ApiError(
-    (body?.code as ApiErrorCode) ?? 'INTERNAL_ERROR',
-    status,
-    body?.message ?? error.message ?? 'An unexpected error occurred',
-    body?.details,
-    body?.requestId
-  );
+    // Clear stored email on auth errors
+    if (resp.status === 401 || resp.status === 403) {
+      try {
+        if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+          localStorage.removeItem('user_email');
+        } else {
+          await SecureStore.deleteItemAsync('user_email');
+        }
+      } catch {}
+    }
+
+    throw new ApiError(
+      (parsed.code as ApiErrorCode) ?? statusToCode(resp.status),
+      resp.status,
+      parsed.message ?? `Request failed with status ${resp.status}`,
+      parsed.details,
+      parsed.requestId
+    );
+  }
+
+  // Handle 204 No Content
+  if (resp.status === 204) return undefined as T;
+
+  return resp.json() as Promise<T>;
 }
 
-// ─── Client setup ───────────────────────────────────────────────────────────
+// ─── Public API ─────────────────────────────────────────────────────────────
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8787';
+const apiClient = {
+  get: <T = any>(path: string, opts?: { params?: Record<string, string | number> }) =>
+    apiFetch<T>(path, { method: 'GET', ...opts }),
 
-const apiClient = axios.create({
-  baseURL: API_URL,
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+  post: <T = any>(path: string, body?: unknown) =>
+    apiFetch<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
 
-// Request interceptor — add API key auth + user email + request ID
-apiClient.interceptors.request.use(
-  async (config) => {
-    // API key auth
-    const apiKey = process.env.EXPO_PUBLIC_API_KEY;
-    if (apiKey) {
-      config.headers['X-API-Key'] = apiKey;
-    }
+  patch: <T = any>(path: string, body?: unknown) =>
+    apiFetch<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
 
-    // Send user email for identity
-    let email: string | null = null;
-    if (Platform.OS === 'web') {
-      email = localStorage.getItem('user_email');
-    } else {
-      email = await SecureStore.getItemAsync('user_email');
-    }
-    if (email) {
-      config.headers['X-User-Email'] = email;
-    }
+  put: <T = any>(path: string, body?: unknown) =>
+    apiFetch<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
 
-    // Generate a client-side request ID so logs can be correlated
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      config.headers['X-Request-ID'] = crypto.randomUUID();
-    }
-
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Response interceptor — normalise errors into ApiError
-apiClient.interceptors.response.use(
-  (response) => response,
-  async (error: AxiosError) => {
-    const apiError = parseApiError(error);
-
-    if (apiError.isAuthError) {
-      // Clear stored email on auth errors
-      if (Platform.OS === 'web') {
-        localStorage.removeItem('user_email');
-      } else {
-        await SecureStore.deleteItemAsync('user_email');
-      }
-    }
-
-    return Promise.reject(apiError);
-  }
-);
+  delete: <T = any>(path: string) =>
+    apiFetch<T>(path, { method: 'DELETE' }),
+};
 
 export default apiClient;

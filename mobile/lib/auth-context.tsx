@@ -41,14 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-
-  // QueryClient may not be available during SSR — safely try to get it
-  let queryClient: ReturnType<typeof useQueryClient> | null = null;
-  try {
-    queryClient = useQueryClient();
-  } catch {
-    // SSR or no QueryClientProvider yet
-  }
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     loadAuth();
@@ -69,27 +62,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = useCallback(async (email: string) => {
-    try {
-      await storage.setItem('user_email', email);
-      setUserEmail(email);
-      setIsAuthenticated(true);
-      // Invalidate all cached queries so they re-fetch with the new identity
-      queryClient?.invalidateQueries();
-    } catch (error) {
-      console.error('Error saving auth:', error);
-      throw error;
-    }
+    await storage.setItem('user_email', email);
+    setUserEmail(email);
+    setIsAuthenticated(true);
+    queryClient.invalidateQueries();
   }, [queryClient]);
 
   const logout = useCallback(async () => {
-    try {
-      await storage.removeItem('user_email');
-      setUserEmail(null);
-      setIsAuthenticated(false);
-      queryClient?.clear();
-    } catch (error) {
-      console.error('Error during logout:', error);
-    }
+    await storage.removeItem('user_email');
+    setUserEmail(null);
+    setIsAuthenticated(false);
+    queryClient.clear();
   }, [queryClient]);
 
   return (

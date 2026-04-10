@@ -18,9 +18,10 @@ export interface VersionListResponse {
 
 export const versionsService = {
   async list(documentId: string, limit = 50, offset = 0): Promise<VersionListResponse> {
-    const { data } = await apiClient.get(`/api/documents/${documentId}/versions`, {
-      params: { limit, offset },
-    });
+    const data = await apiClient.get<VersionListResponse>(
+      `/api/documents/${documentId}/versions`,
+      { params: { limit, offset } }
+    );
     return {
       versions: data.versions || [],
       total: data.total ?? 0,
@@ -30,7 +31,7 @@ export const versionsService = {
   },
 
   async create(documentId: string): Promise<Version> {
-    const { data } = await apiClient.post(`/api/documents/${documentId}/versions`);
+    const data = await apiClient.post<{ version: Version }>(`/api/documents/${documentId}/versions`);
     return data.version;
   },
 

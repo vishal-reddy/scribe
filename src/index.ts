@@ -29,7 +29,7 @@ app.use('*', async (c, next) => {
   const origins = allowedRaw
     ? allowedRaw.split(',').map((o) => o.trim())
     : c.env.ENVIRONMENT === 'production'
-      ? [] // No CORS in production without explicit config
+      ? ['*'] // Allow all until ALLOWED_ORIGINS is explicitly configured
       : ['http://localhost:8081', 'http://localhost:19006', 'http://localhost:8787'];
 
   return cors({
@@ -38,7 +38,7 @@ app.use('*', async (c, next) => {
       return origins.includes(origin) ? origin : '';
     },
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'CF-Authorization', 'X-Request-ID', 'X-API-Key'],
+    allowHeaders: ['Content-Type', 'Authorization', 'CF-Authorization', 'X-Request-ID', 'X-API-Key', 'X-User-Email'],
     exposeHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'Retry-After'],
     maxAge: 86400,
     credentials: true,

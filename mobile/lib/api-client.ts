@@ -69,20 +69,31 @@ async function buildHeaders(
     ...extra,
   };
 
-  // API key auth
-  if (API_KEY) {
-    headers['X-API-Key'] = API_KEY;
-  }
+  // Try session token first (new OTP auth)
+  let sessionToken: string | null = null;
+  try {
+    if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      sessionToken = localStorage.getItem('session_token');
+    } else {
+      sessionToken = await SecureStore.getItemAsync('session_token');
+    }
+  } catch {}
 
-  // User identity
-  let email: string | null = getStoredEmail();
-  if (!email && Platform.OS !== 'web') {
-    try {
-      email = await SecureStore.getItemAsync('user_email');
-    } catch {}
-  }
-  if (email) {
-    headers['X-User-Email'] = email;
+  if (sessionToken) {
+    headers['Authorization'] = `Bearer ${sessionToken}`;
+  } else if (API_KEY) {
+    // Fallback to API key (legacy/admin)
+    headers['X-API-Key'] = API_KEY;
+    // User identity from email storage
+    let email: string | null = getStoredEmail();
+    if (!email && Platform.OS !== 'web') {
+      try {
+        email = await SecureStore.getItemAsync('user_email');
+      } catch {}
+    }
+    if (email) {
+      headers['X-User-Email'] = email;
+    }
   }
 
   // Request correlation
@@ -159,12 +170,16 @@ async function apiFetch<T = any>(
 
     const parsed = parseErrorBody(body);
 
-    // Clear stored email on auth errors
+    // Clear stored auth on auth errors
     if (resp.status === 401 || resp.status === 403) {
       try {
         if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+          localStorage.removeItem('session_token');
+          localStorage.removeItem('user_data');
           localStorage.removeItem('user_email');
         } else {
+          await SecureStore.deleteItemAsync('session_token');
+          await SecureStore.deleteItemAsync('user_data');
           await SecureStore.deleteItemAsync('user_email');
         }
       } catch {}

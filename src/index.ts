@@ -11,6 +11,7 @@ import health from './routes/health';
 import sync from './routes/sync';
 import documents from './routes/documents';
 import claude from './routes/claude';
+import auth from './routes/auth';
 import { ScribeMCP } from './mcp/scribe-mcp';
 import type { Env } from './types';
 
@@ -27,7 +28,9 @@ app.use('*', async (c, next) => {
   const allowedRaw = c.env.ALLOWED_ORIGINS;
   const origins = allowedRaw
     ? allowedRaw.split(',').map((o) => o.trim())
-    : ['*'];
+    : c.env.ENVIRONMENT === 'production'
+      ? [] // No CORS in production without explicit config
+      : ['http://localhost:8081', 'http://localhost:19006', 'http://localhost:8787'];
 
   return cors({
     origin: (origin) => {
@@ -35,7 +38,7 @@ app.use('*', async (c, next) => {
       return origins.includes(origin) ? origin : '';
     },
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'CF-Authorization', 'X-Request-ID', 'X-API-Key', 'X-User-Email'],
+    allowHeaders: ['Content-Type', 'Authorization', 'CF-Authorization', 'X-Request-ID', 'X-API-Key'],
     exposeHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'Retry-After'],
     maxAge: 86400,
     credentials: true,
@@ -68,8 +71,14 @@ app.get('/', (c) => c.json({
 // Health routes (no auth required)
 app.route('/', health);
 
-// Protected API routes
-app.use('/api/*', authMiddleware);
+// Protected API routes — exempt auth public endpoints
+app.use('/api/*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path === '/api/auth/request-otp' || path === '/api/auth/verify-otp') {
+    return next();
+  }
+  return authMiddleware(c, next);
+});
 
 // General rate limit for all API routes
 app.use('/api/*', generalRateLimit);
@@ -87,6 +96,9 @@ app.get('/api/user', (c) => {
 
 // Sync routes for document collaboration
 app.route('/api/sync', sync);
+
+// Auth routes (request-otp and verify-otp are public, session/logout require auth)
+app.route('/api/auth', auth);
 
 // Document CRUD routes with moderate rate limit
 app.use('/api/documents/*', documentRateLimit);
@@ -118,9 +130,19 @@ function validateMcpAuth(request: Request, env: Env): Response | null {
     return null;
   }
 
-  // No token configured = open (for initial setup)
+  // No token configured — block in production, allow in dev
   if (!env.MCP_AUTH_TOKEN) {
-    return null;
+    if (!env.ENVIRONMENT || env.ENVIRONMENT === 'production') {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'MCP auth not configured' },
+          id: null,
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return null; // Allow in dev
   }
 
   const authHeader = request.headers.get('Authorization');

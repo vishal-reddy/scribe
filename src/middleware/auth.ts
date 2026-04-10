@@ -1,4 +1,7 @@
 import { Context, Next } from 'hono';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+import * as schema from '../db/schema';
 import type { Env } from '../types';
 
 // --- JWKS cache ---
@@ -176,20 +179,41 @@ function parseJWTDev(token: string): JWTPayload | null {
  * - Development: simplified JWT decode (no signature verification)
  */
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
-  // API Key auth bypass — allows mobile/web clients to authenticate with a shared secret
+  // API Key auth — fixed admin identity, no impersonation
   const apiKey = c.req.header('X-API-Key');
   if (apiKey && c.env.SCRIBE_API_KEY && apiKey === c.env.SCRIBE_API_KEY) {
-    const email = c.req.header('X-User-Email') || 'vishal@scribe.app';
+    const email = 'vishal@scribe.app';
     const userId = await hashEmail(email);
     c.set('userId', userId);
     c.set('userEmail', email);
-    c.set('userName', email.split('@')[0]);
+    c.set('userName', 'vishal');
     await next();
     return;
   }
 
-  const cfToken = c.req.header('CF-Authorization');
+  // Session token auth — per-user tokens from OTP verification
   const authHeader = c.req.header('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    // Skip if it looks like a JWT (has dots) — that's CF Access or dev JWT
+    if (!token.includes('.')) {
+      const tokenHash = await hashEmail(token); // reuse SHA-256 helper
+      const db = drizzle(c.env.DB, { schema });
+      const user = await db.select().from(schema.users)
+        .where(eq(schema.users.sessionToken, tokenHash)).get();
+
+      if (user && user.sessionExpiresAt && user.sessionExpiresAt > new Date()) {
+        c.set('userId', user.id);
+        c.set('userEmail', user.email);
+        c.set('userName', user.name || user.email);
+        await next();
+        return;
+      }
+      // Invalid/expired token — fall through to other methods
+    }
+  }
+
+  const cfToken = c.req.header('CF-Authorization');
   const token = cfToken || authHeader?.replace('Bearer ', '');
 
   if (!token) {

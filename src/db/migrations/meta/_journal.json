@@ -15,6 +15,13 @@
       "when": 1775602934976,
       "tag": "0001_sour_epoch",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1775700000000,
+      "tag": "0002_security_users",
+      "breakpoints": true
     }
   ]
 }

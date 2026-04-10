@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, desc, count } from 'drizzle-orm';
+import { eq, desc, count, or, sql } from 'drizzle-orm';
 import { zValidator } from '@hono/zod-validator';
 import Anthropic from '@anthropic-ai/sdk';
 import * as schema from '../db/schema';
@@ -49,6 +49,12 @@ claude.get('/status', async (c) => {
 claude.get('/artifacts', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const { limit, offset } = parsePagination(c);
+  const userId = c.get('userId');
+
+  const ownershipFilter = or(
+    eq(schema.documents.userId, userId),
+    sql`${schema.documents.userId} IS NULL`
+  );
 
   try {
     const documents = await db
@@ -62,13 +68,15 @@ claude.get('/artifacts', async (c) => {
         lastEditedBy: schema.documents.lastEditedBy,
       })
       .from(schema.documents)
+      .where(ownershipFilter)
       .orderBy(desc(schema.documents.updatedAt))
       .limit(limit)
       .offset(offset);
 
     const [{ total }] = await db
       .select({ total: count() })
-      .from(schema.documents);
+      .from(schema.documents)
+      .where(ownershipFilter);
 
     return c.json({
       artifacts: documents.map((doc) => ({
@@ -97,6 +105,7 @@ claude.get('/artifacts', async (c) => {
 claude.get('/artifacts/:id', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const artifactId = c.req.param('id');
+  const userId = c.get('userId');
 
   try {
     const doc = await db
@@ -106,6 +115,11 @@ claude.get('/artifacts/:id', async (c) => {
       .get();
 
     if (!doc) {
+      return c.json({ error: 'Artifact not found' }, 404);
+    }
+
+    // Ownership check
+    if (doc.userId && doc.userId !== userId) {
       return c.json({ error: 'Artifact not found' }, 404);
     }
 
@@ -133,6 +147,7 @@ claude.get('/artifacts/:id', async (c) => {
 claude.post('/create', zValidator('json', claudeCreateDocumentSchema), async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const data = c.req.valid('json');
+  const userId = c.get('userId');
 
   try {
     const artifactId = crypto.randomUUID();
@@ -147,6 +162,7 @@ claude.post('/create', zValidator('json', claudeCreateDocumentSchema), async (c)
       updatedAt: now,
       createdBy: 'claude',
       lastEditedBy: 'claude',
+      userId,
     };
 
     await db.insert(schema.documents).values(newDoc);
@@ -184,6 +200,7 @@ claude.post('/edit/:id', zValidator('json', claudeEditDocumentSchema), async (c)
   const db = drizzle(c.env.DB, { schema });
   const artifactId = c.req.param('id');
   const data = c.req.valid('json');
+  const userId = c.get('userId');
 
   if (!c.env.ANTHROPIC_API_KEY) {
     return c.json({
@@ -201,6 +218,11 @@ claude.post('/edit/:id', zValidator('json', claudeEditDocumentSchema), async (c)
       .get();
 
     if (!doc) {
+      return c.json({ error: 'Artifact not found' }, 404);
+    }
+
+    // Ownership check
+    if (doc.userId && doc.userId !== userId) {
       return c.json({ error: 'Artifact not found' }, 404);
     }
 
@@ -297,9 +319,16 @@ claude.post('/prompt', zValidator('json', claudePromptSchema), async (c) => {
         .where(eq(schema.documents.id, data.documentId))
         .get();
 
-      if (doc) {
-        documentContext = `\n\nCurrent document:\nTitle: ${doc.title}\nContent:\n${doc.markdown}`;
+      if (!doc) {
+        return c.json({ error: 'Document not found' }, 404);
       }
+
+      // Ownership check
+      if (doc.userId && doc.userId !== userId) {
+        return c.json({ error: 'Document not found' }, 404);
+      }
+
+      documentContext = `\n\nCurrent document:\nTitle: ${doc.title}\nContent:\n${doc.markdown}`;
     }
 
     // Build prompt for Claude
@@ -380,9 +409,16 @@ claude.post('/prompt', zValidator('json', claudePromptSchema), async (c) => {
 claude.get('/history/:documentId', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const documentId = c.req.param('documentId');
+  const userId = c.get('userId');
   const { limit, offset } = parsePagination(c);
 
   try {
+    // Verify document ownership
+    const doc = await db.select().from(schema.documents).where(eq(schema.documents.id, documentId)).get();
+    if (doc && doc.userId && doc.userId !== userId) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
     const history = await db
       .select()
       .from(schema.claudeInteractions)

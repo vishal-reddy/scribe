@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { eq, desc, like, or, sql, count } from 'drizzle-orm';
+import { eq, desc, like, or, sql, count, and } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { createDocumentSchema, updateDocumentSchema } from '../types';
@@ -23,6 +23,7 @@ function parsePagination(c: { req: { query: (key: string) => string | undefined 
 documents.get('/search', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const query = c.req.query('q')?.trim();
+  const userId = c.get('userId');
 
   if (!query) {
     return c.json({ error: 'Query parameter "q" is required' }, 400);
@@ -30,6 +31,11 @@ documents.get('/search', async (c) => {
 
   const { limit, offset } = parsePagination(c);
   const pattern = `%${query}%`;
+
+  const ownershipFilter = or(
+    eq(schema.documents.userId, userId),
+    sql`${schema.documents.userId} IS NULL`
+  );
 
   try {
     const results = await db
@@ -46,9 +52,12 @@ documents.get('/search', async (c) => {
       })
       .from(schema.documents)
       .where(
-        or(
-          like(schema.documents.title, pattern),
-          like(schema.documents.markdown, pattern),
+        and(
+          ownershipFilter,
+          or(
+            like(schema.documents.title, pattern),
+            like(schema.documents.markdown, pattern),
+          )
         )
       )
       .orderBy(sql`relevance DESC`, desc(schema.documents.updatedAt))
@@ -59,9 +68,12 @@ documents.get('/search', async (c) => {
       .select({ total: count() })
       .from(schema.documents)
       .where(
-        or(
-          like(schema.documents.title, pattern),
-          like(schema.documents.markdown, pattern),
+        and(
+          ownershipFilter,
+          or(
+            like(schema.documents.title, pattern),
+            like(schema.documents.markdown, pattern),
+          )
         )
       );
 
@@ -79,6 +91,12 @@ documents.get('/search', async (c) => {
 documents.get('/', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const { limit, offset } = parsePagination(c);
+  const userId = c.get('userId');
+
+  const ownershipFilter = or(
+    eq(schema.documents.userId, userId),
+    sql`${schema.documents.userId} IS NULL`
+  );
 
   try {
     const allDocs = await db
@@ -92,13 +110,15 @@ documents.get('/', async (c) => {
         lastEditedBy: schema.documents.lastEditedBy,
       })
       .from(schema.documents)
+      .where(ownershipFilter)
       .orderBy(desc(schema.documents.updatedAt))
       .limit(limit)
       .offset(offset);
 
     const [{ total }] = await db
       .select({ total: count() })
-      .from(schema.documents);
+      .from(schema.documents)
+      .where(ownershipFilter);
 
     return c.json({ documents: allDocs, total, limit, offset });
   } catch (error) {
@@ -114,6 +134,7 @@ documents.get('/', async (c) => {
 documents.get('/:id', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const documentId = c.req.param('id');
+  const userId = c.get('userId');
 
   try {
     const doc = await db
@@ -123,6 +144,11 @@ documents.get('/:id', async (c) => {
       .get();
 
     if (!doc) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
+    // Ownership check (allow legacy docs without userId)
+    if (doc.userId && doc.userId !== userId) {
       return c.json({ error: 'Document not found' }, 404);
     }
 
@@ -166,6 +192,7 @@ documents.post('/', zValidator('json', createDocumentSchema), async (c) => {
       updatedAt: now,
       createdBy: 'user',
       lastEditedBy: 'user',
+      userId: c.get('userId'),
     };
 
     await db.insert(schema.documents).values(newDoc);
@@ -185,6 +212,7 @@ documents.patch('/:id', zValidator('json', updateDocumentSchema), async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const documentId = c.req.param('id');
   const data = c.req.valid('json');
+  const userId = c.get('userId');
 
   try {
     // Check if document exists
@@ -195,6 +223,11 @@ documents.patch('/:id', zValidator('json', updateDocumentSchema), async (c) => {
       .get();
 
     if (!existing) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
+    // Ownership check
+    if (existing.userId && existing.userId !== userId) {
       return c.json({ error: 'Document not found' }, 404);
     }
 
@@ -234,6 +267,7 @@ documents.patch('/:id', zValidator('json', updateDocumentSchema), async (c) => {
 documents.delete('/:id', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const documentId = c.req.param('id');
+  const userId = c.get('userId');
 
   try {
     // Check if document exists
@@ -244,6 +278,11 @@ documents.delete('/:id', async (c) => {
       .get();
 
     if (!existing) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
+    // Ownership check
+    if (existing.userId && existing.userId !== userId) {
       return c.json({ error: 'Document not found' }, 404);
     }
 
@@ -266,9 +305,19 @@ documents.delete('/:id', async (c) => {
 documents.get('/:id/versions', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const documentId = c.req.param('id');
+  const userId = c.get('userId');
   const { limit, offset } = parsePagination(c);
 
   try {
+    // Verify document ownership
+    const doc = await db.select().from(schema.documents).where(eq(schema.documents.id, documentId)).get();
+    if (!doc) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+    if (doc.userId && doc.userId !== userId) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
     const versions = await db
       .select()
       .from(schema.documentVersions)
@@ -296,6 +345,7 @@ documents.get('/:id/versions', async (c) => {
 documents.post('/:id/versions', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const documentId = c.req.param('id');
+  const userId = c.get('userId');
 
   try {
     // Get current document
@@ -306,6 +356,11 @@ documents.post('/:id/versions', async (c) => {
       .get();
 
     if (!doc) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
+    // Ownership check
+    if (doc.userId && doc.userId !== userId) {
       return c.json({ error: 'Document not found' }, 404);
     }
 

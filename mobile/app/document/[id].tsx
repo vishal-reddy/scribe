@@ -19,6 +19,7 @@ import NotionEditor, { NotionEditorRef } from '../../components/NotionEditor';
 import SyncStatus from '../../components/SyncStatus';
 import ClaudeEditingBanner from '../../components/ClaudeEditingBanner';
 import { documentsService } from '../../lib/services/documents';
+import { exportDocument, EXPORT_FORMATS, getFormatLabel, type ExportFormat } from '../../lib/export';
 
 const BURGUNDY = '#971B2F';
 const CREAM_BG = '#FAFAF7';
@@ -50,6 +51,7 @@ export default function DocumentEditorScreen() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [relativeTime, setRelativeTime] = useState('');
 
@@ -117,34 +119,47 @@ export default function DocumentEditorScreen() {
     }
   };
 
-  const handleExport = async () => {
+  const handleExport = async (format: ExportFormat = 'md') => {
     setIsExporting(true);
     try {
       const markdownContent = blockNoteRef.current?.getContent() || markdown;
-
-      if (Platform.OS === 'web') {
-        const blob = new Blob([markdownContent], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${docData?.title || 'document'}.md`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } else {
-        await Share.share({
-          message: markdownContent,
-          title: `${docData?.title || 'document'}.md`,
-        });
-      }
+      await exportDocument({
+        title: docData?.title || 'Untitled',
+        markdown: markdownContent,
+        format,
+      });
     } catch (error) {
       console.error('Export error:', error);
-      if (Platform.OS === 'web') {
-        alert('Failed to export document');
-      } else {
-        Alert.alert('Error', 'Failed to export document');
-      }
+      const msg = 'Failed to export document';
+      if (Platform.OS === 'web') alert(msg);
+      else Alert.alert('Error', msg);
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleExportMenu = () => {
+    if (Platform.OS === 'ios') {
+      const options = EXPORT_FORMATS.map(getFormatLabel);
+      options.push('Cancel');
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex: options.length - 1, title: 'Export As' },
+        (index) => {
+          if (index < EXPORT_FORMATS.length) handleExport(EXPORT_FORMATS[index]);
+        }
+      );
+    } else if (Platform.OS === 'web') {
+      // Show a simple dropdown using native confirm for each format
+      // Web gets a format picker via the export modal
+      setShowExportModal(true);
+    } else {
+      Alert.alert('Export As', 'Choose a format', [
+        ...EXPORT_FORMATS.map((f) => ({
+          text: getFormatLabel(f),
+          onPress: () => handleExport(f),
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ]);
     }
   };
 
@@ -182,7 +197,7 @@ export default function DocumentEditorScreen() {
         },
         (index) => {
           if (index === 0) handleSave();
-          else if (index === 1) handleExport();
+          else if (index === 1) handleExportMenu();
           else if (index === 2) handleShare();
           else if (index === 3) router.push(`/history/${documentId}`);
           else if (index === 4) router.push(`/claude?documentId=${documentId}`);
@@ -191,7 +206,7 @@ export default function DocumentEditorScreen() {
     } else {
       Alert.alert('Actions', undefined, [
         { text: 'Save Version', onPress: handleSave },
-        { text: 'Export', onPress: handleExport },
+        { text: 'Export', onPress: handleExportMenu },
         { text: 'Share', onPress: handleShare },
         { text: 'History', onPress: () => router.push(`/history/${documentId}`) },
         { text: 'Ask Claude', onPress: () => router.push(`/claude?documentId=${documentId}`) },
@@ -296,6 +311,71 @@ export default function DocumentEditorScreen() {
             : 'Saving...'}
         </Text>
       </View>
+
+      {/* Export format picker (web) */}
+      {showExportModal && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 100,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: '#FFFDF9',
+              borderRadius: 12,
+              padding: 24,
+              width: 320,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.15,
+              shadowRadius: 12,
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#1E1E1E', marginBottom: 16 }}>
+              Export As
+            </Text>
+            {EXPORT_FORMATS.map((fmt) => (
+              <TouchableOpacity
+                key={fmt}
+                onPress={() => {
+                  setShowExportModal(false);
+                  handleExport(fmt);
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: 12,
+                  paddingHorizontal: 12,
+                  borderRadius: 8,
+                  marginBottom: 4,
+                }}
+              >
+                <Text style={{ fontSize: 16, color: '#1E1E1E', flex: 1 }}>
+                  {getFormatLabel(fmt)}
+                </Text>
+                <Ionicons name="download-outline" size={18} color="#971B2F" />
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              onPress={() => setShowExportModal(false)}
+              style={{
+                marginTop: 8,
+                paddingVertical: 10,
+                alignItems: 'center',
+                borderRadius: 8,
+                backgroundColor: '#F7F5F2',
+              }}
+            >
+              <Text style={{ fontSize: 14, color: '#666' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }

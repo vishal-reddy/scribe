@@ -52,6 +52,7 @@ export default function DocumentEditorScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showOverflowModal, setShowOverflowModal] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [relativeTime, setRelativeTime] = useState('');
 
@@ -189,7 +190,9 @@ export default function DocumentEditorScreen() {
   };
 
   const handleOverflowMenu = () => {
-    if (Platform.OS === 'ios') {
+    if (Platform.OS === 'web') {
+      setShowOverflowModal(true);
+    } else if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
           options: ['Save Version', 'Export', 'Share', 'History', 'Ask Claude', 'Cancel'],
@@ -373,6 +376,67 @@ export default function DocumentEditorScreen() {
             >
               <Text style={{ fontSize: 14, color: '#666' }}>Cancel</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Overflow actions menu (web) */}
+      {showOverflowModal && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            justifyContent: 'flex-start',
+            alignItems: 'flex-end',
+            paddingTop: 56,
+            paddingRight: 12,
+            zIndex: 100,
+          }}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setShowOverflowModal(false)}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+          />
+          <View
+            style={{
+              backgroundColor: '#FFFDF9',
+              borderRadius: 10,
+              paddingVertical: 6,
+              width: 200,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.15,
+              shadowRadius: 12,
+            }}
+          >
+            {([
+              { label: 'Save Version', icon: 'save-outline' as const, onPress: handleSave },
+              { label: 'Export', icon: 'download-outline' as const, onPress: () => { setShowOverflowModal(false); handleExportMenu(); } },
+              { label: 'Share', icon: 'share-outline' as const, onPress: handleShare },
+              { label: 'History', icon: 'time-outline' as const, onPress: () => router.push(`/history/${documentId}`) },
+              { label: 'Ask Claude', icon: 'chatbubble-ellipses-outline' as const, onPress: () => router.push(`/claude?documentId=${documentId}`) },
+            ]).map((item, i) => (
+              <TouchableOpacity
+                key={item.label}
+                onPress={() => {
+                  setShowOverflowModal(false);
+                  item.onPress();
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: 11,
+                  paddingHorizontal: 16,
+                  borderBottomWidth: i < 4 ? 0.5 : 0,
+                  borderBottomColor: '#E5E1DC',
+                }}
+              >
+                <Ionicons name={item.icon} size={18} color="#666" style={{ marginRight: 12 }} />
+                <Text style={{ fontSize: 15, color: '#1E1E1E' }}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
       )}

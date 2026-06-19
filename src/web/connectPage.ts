@@ -7,10 +7,29 @@
  *  - Error prevention (one canonical URL with a copy button — no typing)
  *  - Help & recovery (troubleshooting section)
  *  - Accessibility: skip link, semantic landmarks, ARIA, visible focus,
- *    AA contrast, responsive layout, and dark-mode support.
+ *    AA contrast, responsive layout.
  *
- * Parameterized so Didactic and Ovrwhlm can reuse it with their own values.
+ * Theme-aware so each KeckerCo app (Scribe, Didactic, Ovrwhlm) renders the page
+ * in its own brand palette/fonts. Drop this file into the app's worker and serve
+ * `renderConnectPage(<APP>_CONNECT)` from GET /connect.
  */
+
+export interface ConnectTheme {
+  bg: string;
+  surface: string;
+  border: string;
+  hover: string;
+  text: string;
+  muted: string;        // must meet AA contrast on `bg`
+  accent: string;
+  accentText: string;   // text/icon color on accent buttons
+  ring: string;         // focus ring
+  fontsHref: string;    // Google Fonts <link href>
+  bodyFont: string;     // CSS font-family for body
+  headingFont: string;  // CSS font-family for h1
+  brandFont: string;    // CSS font-family for the wordmark
+  brandLetterSpacing: string;
+}
 
 export interface ConnectConfig {
   appName: string;        // "Scribe"
@@ -20,7 +39,18 @@ export interface ConnectConfig {
   examplePrompts: string[];
   homeHref: string;       // "/"
   docsHref?: string;      // link to fuller docs, optional
+  theme: ConnectTheme;
 }
+
+export const SCRIBE_THEME: ConnectTheme = {
+  bg: '#FAFAFA', surface: '#FFFFFF', border: '#E4E4E7', hover: '#F4F4F5',
+  text: '#18181B', muted: '#5C5C66', accent: '#3A3A3C', accentText: '#FAFAFA', ring: '#3A3A3C',
+  fontsHref: 'https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600&family=Nunito:wght@700&display=swap',
+  bodyFont: "'Inter',-apple-system,sans-serif",
+  headingFont: "'EB Garamond',serif",
+  brandFont: "'Nunito',sans-serif",
+  brandLetterSpacing: '0.2em',
+};
 
 export const SCRIBE_CONNECT: ConnectConfig = {
   appName: 'Scribe',
@@ -35,6 +65,7 @@ export const SCRIBE_CONNECT: ConnectConfig = {
   ],
   homeHref: '/',
   docsHref: '/',
+  theme: SCRIBE_THEME,
 };
 
 function esc(s: string): string {
@@ -44,7 +75,7 @@ function esc(s: string): string {
 }
 
 export function renderConnectPage(cfg: ConnectConfig = SCRIBE_CONNECT): string {
-  const { appName, brand, mcpUrl } = cfg;
+  const { appName, brand, mcpUrl, theme: t } = cfg;
   const promptItems = cfg.examplePrompts.map((p) => `<li>${esc(p)}</li>`).join('');
 
   return `<!doctype html>
@@ -56,57 +87,50 @@ export function renderConnectPage(cfg: ConnectConfig = SCRIBE_CONNECT): string {
 <meta name="description" content="Step-by-step guide to connecting Claude to ${esc(appName)} as a custom connector."/>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600&family=Nunito:wght@700&display=swap" rel="stylesheet">
+<link href="${t.fontsHref}" rel="stylesheet">
 <style>
-:root{--bg:#FAFAFA;--surface:#FFFFFF;--surface-border:#E4E4E7;--surface-hover:#F4F4F5;--text:#18181B;--muted:#5C5C66;--accent:#3A3A3C;--ring:#3A3A3C;--font:'Inter',-apple-system,sans-serif}
+:root{--bg:${t.bg};--surface:${t.surface};--surface-border:${t.border};--surface-hover:${t.hover};--text:${t.text};--muted:${t.muted};--accent:${t.accent};--accent-text:${t.accentText};--ring:${t.ring};--font:${t.bodyFont};--heading:${t.headingFont};--brand:${t.brandFont}}
 *{box-sizing:border-box}html,body{margin:0;padding:0}
 body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;flex-direction:column;line-height:1.5}
 a{color:inherit}
 :focus-visible{outline:3px solid var(--ring);outline-offset:2px;border-radius:6px}
-.skip{position:absolute;left:-9999px;top:8px;background:var(--accent);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;z-index:10}
+.skip{position:absolute;left:-9999px;top:8px;background:var(--accent);color:var(--accent-text);padding:10px 16px;border-radius:8px;font-weight:600;z-index:10}
 .skip:focus{left:16px}
 nav{display:flex;align-items:center;justify-content:space-between;padding:0 40px;height:64px;border-bottom:1px solid var(--surface-border);flex-shrink:0}
-.brand{font-family:'Nunito',sans-serif;font-weight:700;font-size:15px;letter-spacing:0.2em;color:var(--text);text-decoration:none}
+.brand{font-family:var(--brand);font-weight:700;font-size:15px;letter-spacing:${t.brandLetterSpacing};color:var(--text);text-decoration:none}
 .nav-back{color:var(--muted);font-size:14px;font-weight:500;text-decoration:none}
 .nav-back:hover{color:var(--text)}
 main{flex:1;width:100%;max-width:760px;margin:0 auto;padding:0 40px}
 .hero{margin:72px 0 8px;text-align:center}
 .eyebrow{font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted);margin:0 0 20px}
-h1{font-family:'EB Garamond',serif;font-size:clamp(40px,7vw,64px);font-weight:500;line-height:1.04;margin:0 0 20px;letter-spacing:-0.01em}
+h1{font-family:var(--heading);font-size:clamp(40px,7vw,64px);font-weight:500;line-height:1.04;margin:0 0 20px;letter-spacing:-0.01em}
 h1 em{font-style:italic}
 .sub{font-size:18px;color:var(--muted);line-height:1.6;margin:0 auto;max-width:520px}
-/* connection diagram */
 .diagram{display:flex;align-items:center;justify-content:center;gap:14px;margin:44px auto 8px;flex-wrap:wrap}
 .node{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:96px}
 .node-box{width:64px;height:64px;border-radius:16px;background:var(--surface);border:1px solid var(--surface-border);display:flex;align-items:center;justify-content:center;color:var(--text)}
 .node-box svg{width:26px;height:26px;display:block}
 .node span{font-size:13px;color:var(--muted);font-weight:500}
 .arrow{color:var(--muted);font-size:22px;line-height:1}
-.callout .ic svg{width:22px;height:22px;display:block;color:var(--muted)}
-/* callout */
 .callout{background:var(--surface);border:1px solid var(--surface-border);border-radius:14px;padding:18px 20px;margin:40px 0 8px;display:flex;gap:14px}
-.callout .ic{font-size:20px;line-height:1.4}
+.callout .ic svg{width:22px;height:22px;display:block;color:var(--muted)}
 .callout h2{font-size:14px;margin:0 0 6px;letter-spacing:0.01em}
 .callout p{margin:0;font-size:14px;color:var(--muted);line-height:1.6}
-/* steps */
 .section-label{font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin:56px 0 18px}
 ol.steps{list-style:none;counter-reset:step;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
 ol.steps>li{counter-increment:step;background:var(--surface);border:1px solid var(--surface-border);border-radius:16px;padding:20px 22px;display:grid;grid-template-columns:40px 1fr;gap:16px;align-items:start}
-ol.steps>li::before{content:counter(step);grid-row:1/span 2;width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--bg);font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}
+ol.steps>li::before{content:counter(step);grid-row:1/span 2;width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--accent-text);font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center}
 .step-t{font-size:16px;font-weight:600;margin:6px 0 4px}
 .step-d{font-size:14.5px;color:var(--muted);margin:0;line-height:1.6}
 .step-d kbd{font-family:var(--font);background:var(--surface-hover);border:1px solid var(--surface-border);border-radius:6px;padding:1px 7px;font-size:13px;font-weight:500;color:var(--text)}
-/* copy box */
 .copy-box{grid-column:1/-1;display:flex;align-items:center;background:var(--surface-hover);border:1px solid var(--surface-border);border-radius:12px;padding:12px 14px;gap:12px;margin-top:12px}
 .copy-url{font-family:'SF Mono','Fira Code',ui-monospace,monospace;font-size:14px;color:var(--text);flex:1;word-break:break-all}
-.copy-btn{background:var(--accent);color:var(--bg);border:none;border-radius:8px;padding:9px 16px;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.copy-btn{background:var(--accent);color:var(--accent-text);border:none;border-radius:8px;padding:9px 16px;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
 .copy-btn:hover{opacity:.85}
-/* prompts */
 .prompts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
 .prompts li{background:var(--surface);border:1px solid var(--surface-border);border-radius:12px;padding:14px 18px;font-size:15px}
-.prompts li::before{content:"“";color:var(--muted);font-family:'EB Garamond',serif;font-size:22px;margin-right:2px}
-.prompts li::after{content:"”";color:var(--muted);font-family:'EB Garamond',serif;font-size:22px}
-/* troubleshooting */
+.prompts li::before{content:"“";color:var(--muted);font-family:var(--heading);font-size:22px;margin-right:2px}
+.prompts li::after{content:"”";color:var(--muted);font-family:var(--heading);font-size:22px}
 details{background:var(--surface);border:1px solid var(--surface-border);border-radius:12px;padding:0;margin-bottom:10px;overflow:hidden}
 summary{cursor:pointer;padding:16px 18px;font-weight:600;font-size:15px;list-style:none}
 summary::-webkit-details-marker{display:none}
@@ -114,7 +138,7 @@ summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
 details[open] summary::after{content:"–"}
 details .body{padding:0 18px 16px;font-size:14.5px;color:var(--muted);line-height:1.6}
 footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;margin-top:72px}
-.footer-brand{font-family:'Nunito',sans-serif;font-weight:700;font-size:12px;letter-spacing:0.18em;color:var(--muted);text-decoration:none}
+.footer-brand{font-family:var(--brand);font-weight:700;font-size:12px;letter-spacing:0.18em;color:var(--muted);text-decoration:none}
 .footer-links{display:flex;gap:20px}
 .footer-links a{font-size:13px;color:var(--muted);text-decoration:none}
 .footer-links a:hover{color:var(--text)}
@@ -188,7 +212,7 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
     <li>
       <div>
         <p class="step-t">You’re connected</p>
-        <p class="step-d">Claude can now work with your notes. Try one of the prompts below.</p>
+        <p class="step-d">Claude can now work with ${esc(appName)}. Try one of the prompts below.</p>
       </div>
     </li>
   </ol>
@@ -198,7 +222,7 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
 
   <h2 class="section-label">If something’s not working</h2>
   <details>
-    <summary>Claude says it can’t find my notes</summary>
+    <summary>Claude says it can’t find my ${esc(appName)} data</summary>
     <div class="body">Open Claude → <kbd>Settings</kbd> → <kbd>Connectors</kbd> → ${esc(appName)} and confirm it shows your email (signed in). If not, click it and sign in again.</div>
   </details>
   <details>
@@ -208,10 +232,6 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
   <details>
     <summary>It’s asking me for a token or an authorization header</summary>
     <div class="body">You don’t need one. Use only the URL above — signing in to ${esc(appName)} grants access automatically.</div>
-  </details>
-  <details>
-    <summary>Changes aren’t showing on my phone</summary>
-    <div class="body">Pull down to refresh in the ${esc(appName)} app. Edits Claude makes sync on the next refresh.</div>
   </details>
 </main>
 <footer>

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 // Users table - stores authenticated users
 export const users = sqliteTable('users', {
@@ -28,10 +28,37 @@ export const documents = sqliteTable('documents', {
   createdBy: text('created_by').notNull(), // 'user' or 'claude'
   lastEditedBy: text('last_edited_by').notNull(), // 'user' or 'claude'
   userId: text('user_id'), // FK to users.id — null for legacy docs
+  parentId: text('parent_id').references((): AnySQLiteColumn => documents.id, { onDelete: 'set null' }), // folder hierarchy
+  sortKey: text('sort_key'), // manual ordering among siblings
 }, (table) => [
   index('idx_documents_updated_at').on(table.updatedAt),
   index('idx_documents_created_by').on(table.createdBy),
   index('idx_documents_user_id').on(table.userId),
+  index('idx_documents_parent_id').on(table.parentId),
+]);
+
+// Zettelkasten links between documents (parsed [[wikilinks]] + manual links)
+export const noteLinks = sqliteTable('note_links', {
+  id: text('id').primaryKey(),
+  sourceId: text('source_id').notNull().references(() => documents.id, { onDelete: 'cascade' }),
+  targetId: text('target_id').references((): AnySQLiteColumn => documents.id, { onDelete: 'set null' }),
+  targetText: text('target_text').notNull(),
+  kind: text('kind').notNull().default('wiki'), // 'wiki' | 'manual'
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (table) => [
+  index('idx_note_links_source_id').on(table.sourceId),
+  index('idx_note_links_target_id').on(table.targetId),
+  index('idx_note_links_target_text').on(table.targetText),
+]);
+
+// Tags — one row per (document, tag)
+export const noteTags = sqliteTable('note_tags', {
+  id: text('id').primaryKey(),
+  documentId: text('document_id').notNull().references(() => documents.id, { onDelete: 'cascade' }),
+  tag: text('tag').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (table) => [
+  index('idx_note_tags_tag').on(table.tag),
 ]);
 
 // Document versions table - snapshots for version history
@@ -70,3 +97,7 @@ export type DocumentVersion = typeof documentVersions.$inferSelect;
 export type NewDocumentVersion = typeof documentVersions.$inferInsert;
 export type ClaudeInteraction = typeof claudeInteractions.$inferSelect;
 export type NewClaudeInteraction = typeof claudeInteractions.$inferInsert;
+export type NoteLink = typeof noteLinks.$inferSelect;
+export type NewNoteLink = typeof noteLinks.$inferInsert;
+export type NoteTag = typeof noteTags.$inferSelect;
+export type NewNoteTag = typeof noteTags.$inferInsert;

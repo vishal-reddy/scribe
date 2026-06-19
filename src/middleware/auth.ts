@@ -27,6 +27,18 @@ interface CachedKeys {
 }
 
 const JWKS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(a)),
+    crypto.subtle.digest('SHA-256', enc.encode(b)),
+  ]);
+  const va = new Uint8Array(ha), vb = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < va.length; i++) diff |= va[i]! ^ vb[i]!;
+  return diff === 0;
+}
 let jwksCache: CachedKeys | null = null;
 
 async function getPublicKeys(teamDomain: string): Promise<Map<string, CryptoKey>> {
@@ -181,7 +193,7 @@ function parseJWTDev(token: string): JWTPayload | null {
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
   // API Key auth — fixed admin identity, no impersonation
   const apiKey = c.req.header('X-API-Key');
-  if (apiKey && c.env.SCRIBE_API_KEY && apiKey === c.env.SCRIBE_API_KEY) {
+  if (apiKey && c.env.SCRIBE_API_KEY && await timingSafeEqual(apiKey, c.env.SCRIBE_API_KEY)) {
     const email = 'vishal@scribe.app';
     const userId = await hashEmail(email);
     c.set('userId', userId);

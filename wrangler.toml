@@ -3,11 +3,16 @@ main = "src/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 
+routes = [
+  { pattern = "scribe.kecker.co", custom_domain = true }
+]
+
 [observability]
 enabled = true
 
 [vars]
 ENVIRONMENT = "production"
+EMAIL_FROM = "Scribe <no-reply@kecker.co>"
 # Comma-separated list of allowed CORS origins for production
 # ALLOWED_ORIGINS = "https://scribe.example.com"
 

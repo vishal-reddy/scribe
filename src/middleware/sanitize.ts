@@ -21,6 +21,16 @@ const DANGEROUS_PATTERNS: RegExp[] = [
   /<\/embed>/gi,
   /<form[\s>]/gi,
   /<\/form>/gi,
+  /<svg[\s>]/gi,
+  /<\/svg>/gi,
+  /<details[\s>]/gi,
+  /<\/details>/gi,
+  /<audio[\s>]/gi,
+  /<\/audio>/gi,
+  /<video[\s>]/gi,
+  /<\/video>/gi,
+  /<base[\s>]/gi,
+  /<link[\s>]/gi,
   /data\s*:\s*text\/html/gi,
   /vbscript\s*:/gi,
 ];
@@ -54,6 +64,20 @@ export function bodySizeLimit(maxBytes: number = MAX_BODY_SIZE) {
         413,
         `Request body too large. Maximum size is ${Math.round(maxBytes / 1024)}KB.`
       );
+    }
+
+    // Enforce by reading actual bytes when Content-Length is absent on mutating methods
+    if (!contentLength && ['POST', 'PUT', 'PATCH'].includes(c.req.method)) {
+      const buf = await c.req.raw.arrayBuffer();
+      if (buf.byteLength > maxBytes) {
+        throw new AppError(
+          ErrorCode.VALIDATION_ERROR,
+          413,
+          `Request body too large. Maximum size is ${Math.round(maxBytes / 1024)}KB.`
+        );
+      }
+      // Cache the buffer so downstream body reads don't fail on consumed stream
+      (c.req as any)._arrayBuffer = buf;
     }
 
     await next();

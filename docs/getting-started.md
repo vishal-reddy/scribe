@@ -73,12 +73,18 @@ Share your work:
 
 ## Connecting Claude Desktop / Claude Code
 
-Developers and power users can connect Claude directly via MCP:
+Connect Claude to Scribe once and it can read, write, search, and auto-organize
+your notes from any conversation.
 
-1. In Claude Desktop, go to Settings → MCP Servers
-2. Add a new server with URL: `https://scribe.sapiagent-proxy.workers.dev/mcp`
-3. Set the authorization header: `Authorization: Bearer <your-mcp-token>`
-4. Claude can now read and write your Scribe documents directly
+**👉 Full visual walkthrough: <https://scribe.kecker.co/connect>**
+
+The short version:
+
+1. In Claude, open **Settings → Connectors**
+2. Click **Add custom connector**
+3. Paste the server URL: `https://scribe.kecker.co/mcp`
+4. **Sign in to Scribe** when prompted — no token or header to paste
+5. Claude can now read and write your Scribe documents directly
 
 ## Tips
 

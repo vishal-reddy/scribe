@@ -18,6 +18,7 @@ import { webAuthRoute } from './routes/web-auth';
 import { ScribeMCP } from './mcp/scribe-mcp';
 import { authenticateAccessToken, authorizationServerMetadata, protectedResourceMetadata } from './lib/oauth';
 import { readSession } from './lib/session';
+import { renderConnectPage } from './web/connectPage';
 import type { SessionData } from './lib/session';
 import type { Env } from './types';
 
@@ -196,6 +197,9 @@ app.get('/', async (c) => {
   const session = await readSession(c);
   return c.html(renderLandingPage(session));
 });
+
+// Public "Connect Claude" setup guide (no auth — it's how new users get started).
+app.get('/connect', (c) => c.html(renderConnectPage()));
 
 app.route('/', health);
 

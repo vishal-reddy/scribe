@@ -143,6 +143,7 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
 .footer-links a{font-size:13px;color:var(--muted);text-decoration:none}
 .footer-links a:hover{color:var(--text)}
 .sr-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.alt-note{font-size:13px;color:var(--muted);text-align:center;margin:22px auto 0;max-width:540px;line-height:1.6}
 @media(max-width:640px){nav,main,footer{padding-left:20px;padding-right:20px}.hero{margin-top:48px}ol.steps>li{padding:18px}.arrow{transform:rotate(90deg)}}
 </style>
 </head>
@@ -181,7 +182,7 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
     <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 11.5h1V16h1"/></svg></span>
     <div>
       <h2>Before you start</h2>
-      <p>You add the connector in <strong>Claude Desktop</strong> or <strong>claude.ai</strong> (a browser) — <strong>not the Claude mobile app</strong>. You’ll also need a paid Claude plan and a <strong>${esc(appName)} account</strong> (the same email you use in the ${esc(appName)} app).</p>
+      <p>You add the connector in <strong>Claude Desktop</strong> or <strong>claude.ai</strong> (a browser) — <strong>not the Claude mobile app</strong>. The <strong>free Claude plan works</strong> — you just need a <strong>${esc(appName)} account</strong> (the same email you use in the ${esc(appName)} app).</p>
     </div>
   </div>
 
@@ -225,6 +226,8 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
     </li>
   </ol>
 
+  <p class="alt-note">These steps show <strong>Claude</strong> — the most common setup. ${esc(appName)} is a standard MCP server, so it also works with <strong>ChatGPT</strong> and other MCP-compatible assistants: add the same URL as a connector there.</p>
+
   <h2 class="section-label">Try saying</h2>
   <ul class="prompts">${promptItems}</ul>
 
@@ -235,7 +238,7 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
   </details>
   <details>
     <summary>I don’t see “Add custom connector”</summary>
-    <div class="body">Custom connectors require a paid Claude plan (Pro, Max, Team, or Enterprise). On a free plan the option is hidden.</div>
+    <div class="body">You’re likely in the Claude <strong>mobile</strong> app — connectors can only be added in <kbd>Claude Desktop</kbd> or <kbd>claude.ai</kbd> (a browser). Open Claude there, then <kbd>Settings</kbd> → <kbd>Connectors</kbd>.</div>
   </details>
   <details>
     <summary>It’s asking me for a token or an authorization header</summary>

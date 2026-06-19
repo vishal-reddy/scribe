@@ -35,20 +35,18 @@ function renderLandingPage(session: SessionData | null): string {
     : `<a href="/connect" class="nav-link">Connect Claude</a><a href="/auth/login" class="nav-link">Sign in</a><a href="/auth/register" class="nav-btn">Get started</a>`;
 
   const heroCta = session
-    ? `<div class="connect-section">
-        <p class="connect-label">MCP Server URL</p>
+    ? `<a href="/connect" class="btn-primary connect-cta">Connect Claude to Scribe →</a>
+       <div class="connect-section">
+        <p class="connect-or">or copy the server URL</p>
         <div class="connect-box">
           <code class="connect-url">${origin}/mcp</code>
           <button class="copy-btn" onclick="navigator.clipboard.writeText('${origin}/mcp').then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
         </div>
-        <p class="connect-hint">Add this URL to Claude Desktop, claude.ai, or any MCP-compatible client.</p>
-        <a href="/connect" class="connect-guide">New to this? Open the step-by-step setup guide →</a>
       </div>`
     : `<div class="hero-cta">
-        <a href="/auth/register" class="btn-primary">Create account</a>
-        <a href="/auth/login" class="btn-secondary">Sign in</a>
-      </div>
-      <a href="/connect" class="connect-guide" style="margin-top:20px">Connecting Claude? See the setup guide →</a>`;
+        <a href="/connect" class="btn-primary">Connect Claude →</a>
+        <a href="/auth/register" class="btn-secondary">Create account</a>
+      </div>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -92,8 +90,8 @@ h1 em{font-style:italic}
 .copy-btn{background:var(--accent);color:var(--bg);border:none;border-radius:8px;padding:7px 14px;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:opacity .15s}
 .copy-btn:hover{opacity:0.85}
 .connect-hint{font-size:13px;color:var(--muted);margin:10px 0 0;line-height:1.55}
-.connect-guide{display:inline-block;margin-top:14px;font-size:14px;font-weight:600;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--surface-border);padding-bottom:1px}
-.connect-guide:hover{border-color:var(--accent)}
+.connect-cta{display:block;width:100%;max-width:460px;margin:0 auto 18px;text-align:center}
+.connect-or{text-align:center;font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
 .divider{max-width:900px;margin:0 auto;padding:0 40px;display:flex;align-items:center;gap:16px;margin-bottom:40px}
 .divider-text{font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
 .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--surface-border)}

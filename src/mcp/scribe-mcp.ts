@@ -5,6 +5,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, like, or, desc, sql } from "drizzle-orm";
 import * as schema from "../db/schema";
 import type { Env } from "../types";
+import { reparseDocument, rebindLinksToTitle } from "../services/notes";
+import {
+  TAXONOMY_GUIDANCE,
+  TAXONOMY_CATEGORIES,
+  fileDocumentInCategory,
+  listUnfiledDocuments,
+} from "../services/classification";
 
 type State = {};
 
@@ -130,7 +137,9 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("create_document", {
-      description: "Create a new document in Scribe",
+      description:
+        "Create a new document in Scribe. After creating, classify the document into the " +
+        "Thomistic taxonomy and file it by calling file_document with the returned document ID.",
       inputSchema: {
         title: z.string().describe("The title of the new document"),
         content: z.string().describe("The markdown content of the document"),
@@ -152,10 +161,92 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
       };
 
       await db.insert(schema.documents).values(newDoc);
+      // Derive #tags / [[wikilinks]] and heal links that pointed to this title.
+      await reparseDocument(db, documentId, newDoc.markdown ?? "");
+      await rebindLinksToTitle(db, documentId, title);
 
       return {
         content: [
-          { type: "text" as const, text: `Document created successfully!\nID: ${documentId}\nTitle: ${title}` },
+          {
+            type: "text" as const,
+            text:
+              `Document created successfully!\nID: ${documentId}\nTitle: ${title}\n\n` +
+              `Now auto-organize it. ${TAXONOMY_GUIDANCE}\n\n` +
+              `Then call file_document with documentId "${documentId}" and your chosen category.`,
+          },
+        ],
+      };
+    });
+
+    // ── Auto-organization (Thomistic taxonomy) ───────────────────────────
+    // Classification uses the user's Claude subscription: Claude picks the
+    // category here in the MCP session; the server only does the filing.
+
+    this.server.registerTool("list_categories", {
+      description:
+        "List the Thomistic taxonomy of the sciences and arts used to organize documents. " +
+        "Use this to choose a category before calling file_document.",
+      inputSchema: {},
+    }, async () => ({
+      content: [{ type: "text" as const, text: TAXONOMY_GUIDANCE }],
+    }));
+
+    this.server.registerTool("file_document", {
+      description:
+        "File a document under its Thomistic taxonomy category. Creates the category folder " +
+        "(and its parent division) if needed and sets the document's parent. Call this after " +
+        "classifying a document with the taxonomy from list_categories.",
+      inputSchema: {
+        documentId: z.string().describe("The ID of the document to file"),
+        category: z
+          .string()
+          .describe(`The taxonomy leaf to file under. One of: ${TAXONOMY_CATEGORIES.join(", ")}`),
+      },
+    }, async ({ documentId, category }) => {
+      const db = this.getDb();
+      const result = await fileDocumentInCategory(db, documentId, category, null);
+      if (!result) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `Could not file document. Either the ID was not found or "${category}" is not a ` +
+                `valid category. Valid categories: ${TAXONOMY_CATEGORIES.join(", ")}.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          { type: "text" as const, text: `Filed under "${result.category}".` },
+        ],
+      };
+    });
+
+    this.server.registerTool("list_unfiled_documents", {
+      description:
+        "List documents that have not been filed under any folder yet (e.g. notes created in the " +
+        "mobile app). Use this to find documents to classify and file with file_document.",
+      inputSchema: {
+        limit: z.number().optional().describe("Max documents to return (default 50)"),
+      },
+    }, async ({ limit }) => {
+      const db = this.getDb();
+      const docs = await listUnfiledDocuments(db, null, limit ?? 50);
+      if (docs.length === 0) {
+        return { content: [{ type: "text" as const, text: "No unfiled documents." }] };
+      }
+      const lines = docs
+        .map((d) => `- ${d.id}: ${d.title}${d.markdown ? ` — ${d.markdown.slice(0, 80)}` : ""}`)
+        .join("\n");
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `${docs.length} unfiled document(s):\n${lines}\n\nClassify each and file with file_document.`,
+          },
         ],
       };
     });

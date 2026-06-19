@@ -9,6 +9,9 @@ import {
   reparseDocument, rebindLinksToTitle, moveDocument, getBacklinks, getOutgoingLinks,
   addManualLink, removeLink, addTag, removeTag, NotFoundError,
 } from '../services/notes';
+import {
+  THOMISTIC_TAXONOMY, TAXONOMY_CATEGORIES, fileDocumentInCategory,
+} from '../services/classification';
 
 const documents = new Hono<{ Bindings: Env }>();
 
@@ -132,6 +135,18 @@ documents.get('/', async (c) => {
     return c.json({ error: 'Failed to fetch documents' }, 500);
   }
 });
+
+/** The Thomistic taxonomy used for classification. GET /api/documents/categories
+ *  (Registered before /:id so the literal path isn't captured as an id.) */
+documents.get('/categories', (c) =>
+  c.json({
+    categories: THOMISTIC_TAXONOMY.map((l) => ({
+      category: l.category,
+      division: l.division ?? null,
+      hint: l.hint,
+    })),
+  }),
+);
 
 /**
  * Get a specific document by ID
@@ -434,6 +449,28 @@ documents.post('/:id/move', async (c) => {
     console.error('move error', e);
     return c.json({ error: 'Failed to move document' }, 500);
   }
+});
+
+/**
+ * File a previously-created document under a Thomistic category.
+ * The caller (Claude over MCP, or a manual picker) supplies the category;
+ * the server creates the category folder if needed and sets the parent.
+ * POST /api/documents/:id/classify { category }
+ */
+documents.post('/:id/classify', async (c) => {
+  const db = drizzle(c.env.DB, { schema });
+  const userId = c.get('userId');
+  const documentId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const category = typeof body.category === 'string' ? body.category : '';
+  if (!category) {
+    return c.json({ error: 'category is required', categories: TAXONOMY_CATEGORIES }, 400);
+  }
+  const result = await fileDocumentInCategory(db, documentId, category, userId);
+  if (!result) {
+    return c.json({ error: 'Document not found or unknown category', categories: TAXONOMY_CATEGORIES }, 400);
+  }
+  return c.json({ filed: result });
 });
 
 /** Backlinks — notes that link TO this one. GET /api/documents/:id/backlinks */

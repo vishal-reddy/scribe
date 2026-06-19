@@ -170,10 +170,18 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
   </div>
 
   <div class="callout">
+    <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3.5 20.5l1.4-5.2A8.5 8.5 0 1 1 21 11.5z"/></svg></span>
+    <div>
+      <h2>How this works</h2>
+      <p><strong>Claude is the assistant you talk to.</strong> Ask Claude to read, write, search, or organize your notes and it does the work in ${esc(appName)}. Open the <strong>${esc(appName)} app</strong> on your phone any time to see and manage the results.</p>
+    </div>
+  </div>
+
+  <div class="callout">
     <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 11.5h1V16h1"/></svg></span>
     <div>
       <h2>Before you start</h2>
-      <p>You need the <strong>Claude app</strong> (desktop, mobile, or claude.ai) on a paid plan — custom connectors are a paid feature — and a <strong>${esc(appName)} account</strong> (the same email you use in the ${esc(appName)} app).</p>
+      <p>You add the connector in <strong>Claude Desktop</strong> or <strong>claude.ai</strong> (a browser) — <strong>not the Claude mobile app</strong>. You’ll also need a paid Claude plan and a <strong>${esc(appName)} account</strong> (the same email you use in the ${esc(appName)} app).</p>
     </div>
   </div>
 
@@ -181,8 +189,8 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
   <ol class="steps">
     <li>
       <div>
-        <p class="step-t">Open Claude</p>
-        <p class="step-d">Use the Claude app on your computer (Claude Desktop) or <kbd>claude.ai</kbd> in a browser.</p>
+        <p class="step-t">Open Claude on desktop or web</p>
+        <p class="step-d"><strong>Custom connectors can’t be added from the Claude mobile app.</strong> Use <kbd>Claude Desktop</kbd> (Mac or Windows) or <kbd>claude.ai</kbd> in a browser to set this up.</p>
       </div>
     </li>
     <li>

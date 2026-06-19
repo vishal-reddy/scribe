@@ -59,7 +59,6 @@ export function renderConnectPage(cfg: ConnectConfig = SCRIBE_CONNECT): string {
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600&family=Nunito:wght@700&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#FAFAFA;--surface:#FFFFFF;--surface-border:#E4E4E7;--surface-hover:#F4F4F5;--text:#18181B;--muted:#5C5C66;--accent:#3A3A3C;--ring:#3A3A3C;--font:'Inter',-apple-system,sans-serif}
-@media(prefers-color-scheme:dark){:root{--bg:#161618;--surface:#1F1F22;--surface-border:#2E2E32;--surface-hover:#26262A;--text:#FAFAFA;--muted:#A8A8B2;--accent:#FAFAFA;--ring:#FAFAFA}}
 *{box-sizing:border-box}html,body{margin:0;padding:0}
 body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;flex-direction:column;line-height:1.5}
 a{color:inherit}
@@ -79,9 +78,11 @@ h1 em{font-style:italic}
 /* connection diagram */
 .diagram{display:flex;align-items:center;justify-content:center;gap:14px;margin:44px auto 8px;flex-wrap:wrap}
 .node{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:96px}
-.node-box{width:64px;height:64px;border-radius:16px;background:var(--surface);border:1px solid var(--surface-border);display:flex;align-items:center;justify-content:center;font-size:26px}
+.node-box{width:64px;height:64px;border-radius:16px;background:var(--surface);border:1px solid var(--surface-border);display:flex;align-items:center;justify-content:center;color:var(--text)}
+.node-box svg{width:26px;height:26px;display:block}
 .node span{font-size:13px;color:var(--muted);font-weight:500}
 .arrow{color:var(--muted);font-size:22px;line-height:1}
+.callout .ic svg{width:22px;height:22px;display:block;color:var(--muted)}
 /* callout */
 .callout{background:var(--surface);border:1px solid var(--surface-border);border-radius:14px;padding:18px 20px;margin:40px 0 8px;display:flex;gap:14px}
 .callout .ic{font-size:20px;line-height:1.4}
@@ -137,15 +138,15 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
   </div>
 
   <div class="diagram" role="img" aria-label="Diagram: you talk to Claude, and Claude connects to ${esc(appName)}.">
-    <div class="node"><div class="node-box" aria-hidden="true">🧑</div><span>You</span></div>
+    <div class="node"><div class="node-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg></div><span>You</span></div>
     <div class="arrow" aria-hidden="true">→</div>
-    <div class="node"><div class="node-box" aria-hidden="true">✳️</div><span>Claude</span></div>
+    <div class="node"><div class="node-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></svg></div><span>Claude</span></div>
     <div class="arrow" aria-hidden="true">→</div>
-    <div class="node"><div class="node-box" aria-hidden="true">✦</div><span>${esc(appName)}</span></div>
+    <div class="node"><div class="node-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M10 12.5h5M10 16h5"/></svg></div><span>${esc(appName)}</span></div>
   </div>
 
   <div class="callout">
-    <span class="ic" aria-hidden="true">📋</span>
+    <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 11.5h1V16h1"/></svg></span>
     <div>
       <h2>Before you start</h2>
       <p>You need the <strong>Claude app</strong> (desktop, mobile, or claude.ai) on a paid plan — custom connectors are a paid feature — and a <strong>${esc(appName)} account</strong> (the same email you use in the ${esc(appName)} app).</p>

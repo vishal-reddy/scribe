@@ -31,8 +31,8 @@ function renderLandingPage(session: SessionData | null): string {
   const origin = 'https://scribe.kecker.co';
 
   const navRight = session
-    ? `<span class="nav-email">${_esc(session.email)}</span><a href="/auth/logout" class="nav-ghost">Sign out</a>`
-    : `<a href="/auth/login" class="nav-link">Sign in</a><a href="/auth/register" class="nav-btn">Get started</a>`;
+    ? `<a href="/connect" class="nav-link">Connect Claude</a><span class="nav-email">${_esc(session.email)}</span><a href="/auth/logout" class="nav-ghost">Sign out</a>`
+    : `<a href="/connect" class="nav-link">Connect Claude</a><a href="/auth/login" class="nav-link">Sign in</a><a href="/auth/register" class="nav-btn">Get started</a>`;
 
   const heroCta = session
     ? `<div class="connect-section">
@@ -42,11 +42,13 @@ function renderLandingPage(session: SessionData | null): string {
           <button class="copy-btn" onclick="navigator.clipboard.writeText('${origin}/mcp').then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
         </div>
         <p class="connect-hint">Add this URL to Claude Desktop, claude.ai, or any MCP-compatible client.</p>
+        <a href="/connect" class="connect-guide">New to this? Open the step-by-step setup guide →</a>
       </div>`
     : `<div class="hero-cta">
         <a href="/auth/register" class="btn-primary">Create account</a>
         <a href="/auth/login" class="btn-secondary">Sign in</a>
-      </div>`;
+      </div>
+      <a href="/connect" class="connect-guide" style="margin-top:20px">Connecting Claude? See the setup guide →</a>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -90,6 +92,8 @@ h1 em{font-style:italic}
 .copy-btn{background:var(--accent);color:var(--bg);border:none;border-radius:8px;padding:7px 14px;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:opacity .15s}
 .copy-btn:hover{opacity:0.85}
 .connect-hint{font-size:13px;color:var(--muted);margin:10px 0 0;line-height:1.55}
+.connect-guide{display:inline-block;margin-top:14px;font-size:14px;font-weight:600;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--surface-border);padding-bottom:1px}
+.connect-guide:hover{border-color:var(--accent)}
 .divider{max-width:900px;margin:0 auto;padding:0 40px;display:flex;align-items:center;gap:16px;margin-bottom:40px}
 .divider-text{font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
 .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--surface-border)}

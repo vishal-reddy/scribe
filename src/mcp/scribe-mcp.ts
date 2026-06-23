@@ -418,5 +418,91 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
         ],
       };
     });
+
+    // ── Learning feed ────────────────────────────────────────────────────
+    // The mobile app has a Twitter-like "feed" tab that resurfaces the user's
+    // own notes as short, scrollable learning snippets. There are no real users
+    // — the feed is a simulation. Claude (in the user's own app) reads their
+    // notes via the tools above and posts back a batch of snippets here; the
+    // app renders them.
+
+    this.server.registerTool("create_feed_posts", {
+      description:
+        "Populate the user's learning feed (a simulated, Twitter-like feed in the Scribe app) with " +
+        "short snippets generated from their notes. First read the relevant notes (list_documents / " +
+        "read_document / search_documents), then write a batch of bite-sized posts that REINFORCE " +
+        "what the notes contain — key insights, active-recall questions, memorable quotes, or " +
+        "connections between notes. Guidance:\n" +
+        "- Keep each `text` punchy and Twitter-length (aim ≤ 280 chars). Plain language, no preamble.\n" +
+        "- Give each post a synthetic persona (`authorName` + `authorHandle` + an emoji `authorAvatar`) " +
+        "themed to the subject (e.g. \"Aquinas Daily\"/\"aquinas\"/\"🟣\"). Reuse handles across related " +
+        "posts so the feed feels like recurring accounts. These are NOT real users.\n" +
+        "- Set `sourceDocumentId` to the note a post came from so the app can link back to it.\n" +
+        "- Vary `kind` across the batch: 'insight' | 'question' | 'quote' | 'connection' | 'hook'.\n" +
+        "- A good batch is ~5–15 posts spanning several notes.",
+      inputSchema: {
+        posts: z
+          .array(
+            z.object({
+              text: z.string().describe("The snippet body. Twitter-length (≤ 280 chars), plain language."),
+              authorName: z.string().describe("Synthetic persona display name, e.g. \"Aquinas Daily\"."),
+              authorHandle: z.string().describe("Persona handle without @, e.g. \"aquinas\". Reuse across related posts."),
+              authorAvatar: z.string().optional().describe("A single emoji for the avatar, e.g. \"🟣\"."),
+              kind: z.string().optional().describe("Style: 'insight' | 'question' | 'quote' | 'connection' | 'hook'."),
+              sourceDocumentId: z.string().optional().describe("ID of the note this snippet came from (links back)."),
+            })
+          )
+          .min(1)
+          .describe("The batch of feed posts to publish."),
+      },
+    }, async ({ posts }) => {
+      const db = this.getDb();
+      const now = new Date();
+
+      // Resolve source note titles in one pass for display + validity.
+      const titleById = new Map<string, string | null>();
+      for (const p of posts) {
+        if (p.sourceDocumentId && !titleById.has(p.sourceDocumentId)) {
+          const doc = await db
+            .select({ title: schema.documents.title })
+            .from(schema.documents)
+            .where(eq(schema.documents.id, p.sourceDocumentId))
+            .get();
+          titleById.set(p.sourceDocumentId, doc?.title ?? null);
+        }
+      }
+
+      const rows: schema.NewFeedPost[] = posts.map((p) => {
+        const sourceTitle = p.sourceDocumentId ? titleById.get(p.sourceDocumentId) ?? null : null;
+        // Drop a sourceDocumentId that doesn't resolve, to avoid a dangling FK.
+        const sourceDocumentId = sourceTitle != null ? p.sourceDocumentId ?? null : null;
+        return {
+          id: crypto.randomUUID(),
+          userId: null,
+          text: p.text,
+          kind: p.kind ?? null,
+          authorName: p.authorName,
+          authorHandle: p.authorHandle.replace(/^@/, ""),
+          authorAvatar: p.authorAvatar ?? null,
+          sourceDocumentId,
+          sourceTitle,
+          createdAt: now,
+          savedAt: null,
+        };
+      });
+
+      await db.insert(schema.feedPosts).values(rows);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `Published ${rows.length} post(s) to the learning feed. ` +
+              `They'll appear in the user's Feed tab, newest first.`,
+          },
+        ],
+      };
+    });
   }
 }

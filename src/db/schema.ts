@@ -88,6 +88,30 @@ export const claudeInteractions = sqliteTable('claude_interactions', {
   index('idx_claude_interactions_created_at').on(table.createdAt),
 ]);
 
+// Feed posts — a simulated social feed. Posts are AI-generated learning
+// snippets resurfaced from the user's notes (no real users / social graph).
+// Claude writes these over MCP; the app reads them like documents
+// (userId IS NULL = visible to everyone, matching the documents pattern).
+export const feedPosts = sqliteTable('feed_posts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id'), // FK to users.id — null for Claude-authored (visible to all)
+  text: text('text').notNull(), // the snippet body (Twitter-length)
+  kind: text('kind'), // Claude's freeform style tag: 'insight' | 'question' | 'quote' | 'connection' | 'hook'
+  // Synthetic persona (no real account) — gives the social feel.
+  authorName: text('author_name').notNull(), // e.g. "Aquinas Daily"
+  authorHandle: text('author_handle').notNull(), // e.g. "aquinas" (rendered as @aquinas)
+  authorAvatar: text('author_avatar'), // emoji or short seed for the avatar
+  sourceDocumentId: text('source_document_id').references((): AnySQLiteColumn => documents.id, { onDelete: 'set null' }),
+  sourceTitle: text('source_title'), // denormalized note title for display
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  savedAt: integer('saved_at', { mode: 'timestamp' }), // bookmarked by the user (null = not saved)
+}, (table) => [
+  index('idx_feed_posts_created_at').on(table.createdAt),
+  index('idx_feed_posts_user_id').on(table.userId),
+  index('idx_feed_posts_source_document_id').on(table.sourceDocumentId),
+  index('idx_feed_posts_saved_at').on(table.savedAt),
+]);
+
 // Export types for TypeScript
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -101,3 +125,5 @@ export type NoteLink = typeof noteLinks.$inferSelect;
 export type NewNoteLink = typeof noteLinks.$inferInsert;
 export type NoteTag = typeof noteTags.$inferSelect;
 export type NewNoteTag = typeof noteTags.$inferInsert;
+export type FeedPost = typeof feedPosts.$inferSelect;
+export type NewFeedPost = typeof feedPosts.$inferInsert;

@@ -431,32 +431,57 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
 
     this.server.registerTool("create_feed_posts", {
       description:
-        "Populate the user's learning feed (a simulated, Twitter-like feed in the Scribe app) with " +
-        "short snippets generated from their notes. First read the relevant notes (list_documents / " +
-        "read_document / search_documents), then write a batch of bite-sized posts that REINFORCE " +
-        "what the notes contain — key insights, active-recall questions, memorable quotes, or " +
-        "connections between notes. Guidance:\n" +
-        "- Keep each `text` punchy and Twitter-length (aim ≤ 280 chars). Plain language, no preamble.\n" +
-        "- Give each post a synthetic persona (`authorName` + `authorHandle` + an emoji `authorAvatar`) " +
-        "themed to the subject (e.g. \"Aquinas Daily\"/\"aquinas\"/\"🟣\"). Reuse handles across related " +
-        "posts so the feed feels like recurring accounts. These are NOT real users.\n" +
-        "- Set `sourceDocumentId` to the note a post came from so the app can link back to it.\n" +
-        "- Vary `kind` across the batch: 'insight' | 'question' | 'quote' | 'connection' | 'hook'.\n" +
-        "- A good batch is ~5–15 posts spanning several notes.",
+        "Populate the user's learning feed — a simulated, Twitter-like feed in the Scribe app whose " +
+        "real purpose is REINFORCEMENT LEARNING: helping the user remember and deepen their own notes. " +
+        "Optimize every post for long-term retention, not for summary.\n\n" +
+        "First read the relevant notes (read_document / list_notes_needing_feed / search_documents), " +
+        "then write a batch of posts grounded ONLY in what those notes actually say. Apply these " +
+        "evidence-based principles (retrieval practice, spacing, elaboration, desirable difficulty):\n" +
+        "- RETRIEVAL FIRST. Most posts should make the reader recall something from memory rather than " +
+        "re-read it — a pointed question, a cloze (fill-in-the-blank using ‘___’ for a key term), or a " +
+        "‘predict / explain’ prompt. The testing effect beats restatement. Plain restated facts should " +
+        "be the minority.\n" +
+        "- ONE IDEA PER POST. Atomic, like a good flashcard. Split a compound idea into several posts.\n" +
+        "- DESIRABLE DIFFICULTY. Make them think: don't reveal the answer inside the question, avoid " +
+        "trivial yes/no, and don't quote the note verbatim when a question would force recall.\n" +
+        "- ELABORATE & CONNECT. Mix in posts that ask ‘why/how’, prompt the reader to restate an idea " +
+        "in their own words, apply it to a concrete example, or link two related notes (‘How does X " +
+        "relate to Y?’). Elaboration and connection build durable memory.\n" +
+        "- SPACE & INTERLEAVE. Pull from across several notes — including OLDER ones, not just the " +
+        "newest — and mix subjects within the batch so retrieval is varied, not blocked.\n" +
+        "- GROUNDED. Never invent facts; everything must be answerable from the user's notes. Always set " +
+        "`sourceDocumentId` so the reader can tap through to verify and study the source.\n\n" +
+        "Style: keep each `text` punchy and Twitter-length (≤ 280 chars), plain language, no preamble. " +
+        "Give each post a synthetic persona (`authorName` + `authorHandle` + emoji `authorAvatar`) themed " +
+        "to the subject (e.g. \"Aquinas Daily\"/\"aquinas\"/\"🟣\"); reuse handles across related posts so it " +
+        "feels like recurring accounts — they are NOT real users. A good batch is ~5–15 posts spanning " +
+        "several notes, mostly retrieval-style.",
       inputSchema: {
         posts: z
           .array(
             z.object({
-              text: z.string().describe("The snippet body. Twitter-length (≤ 280 chars), plain language."),
+              text: z
+                .string()
+                .describe(
+                  "The post body, optimized for recall (a question, cloze ‘___’, or prompt to explain/apply) " +
+                  "rather than a restatement. Twitter-length (≤ 280 chars), plain language, no preamble."
+                ),
               authorName: z.string().describe("Synthetic persona display name, e.g. \"Aquinas Daily\"."),
               authorHandle: z.string().describe("Persona handle without @, e.g. \"aquinas\". Reuse across related posts."),
               authorAvatar: z.string().optional().describe("A single emoji for the avatar, e.g. \"🟣\"."),
-              kind: z.string().optional().describe("Style: 'insight' | 'question' | 'quote' | 'connection' | 'hook'."),
-              sourceDocumentId: z.string().optional().describe("ID of the note this snippet came from (links back)."),
+              kind: z
+                .string()
+                .optional()
+                .describe(
+                  "Learning style — favor the retrieval kinds: 'recall' (question answered from memory) | " +
+                  "'cloze' (fill-in-the-blank) | 'why' (elaborative why/how) | 'apply' (use it on an example) | " +
+                  "'connect' (link two notes) | 'insight' (a sharp key idea — use sparingly)."
+                ),
+              sourceDocumentId: z.string().optional().describe("ID of the note this post came from (links back + dequeues it). Always set when known."),
             })
           )
           .min(1)
-          .describe("The batch of feed posts to publish."),
+          .describe("The batch of feed posts to publish. Aim for mostly retrieval-style posts across several notes."),
       },
     }, async ({ posts }) => {
       const db = this.getDb();
@@ -522,9 +547,10 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     this.server.registerTool("list_notes_needing_feed", {
       description:
         "List notes that have been created or edited but don't have a learning-feed post yet " +
-        "(the feed auto-queue). Use this to drive the feed: read each note, then call " +
-        "create_feed_posts with snippets that reinforce it — that automatically clears the note " +
-        "from this queue. Returns oldest-queued first.",
+        "(the feed auto-queue). Use this to drive the feed: read each note (read_document), then call " +
+        "create_feed_posts with retrieval-style posts that reinforce it — mostly recall questions and " +
+        "cloze prompts, not restatements — which automatically clears the note from this queue. " +
+        "Returns oldest-queued first.",
       inputSchema: {
         limit: z.number().optional().describe("Max notes to return (default 25)"),
       },

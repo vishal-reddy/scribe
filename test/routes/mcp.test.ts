@@ -21,10 +21,11 @@ describe('MCP Server', () => {
     expect(typeof ScribeMCP).toBe('function');
   });
 
-  it('should have MCP advertised in root endpoint', async () => {
-    const res = await app.request('/', { method: 'GET' }, env);
+  it('should advertise the MCP endpoint on the connect page', async () => {
+    const res = await app.request('/connect', { method: 'GET' }, env);
     expect(res.status).toBe(200);
-    const data: any = await res.json();
-    expect(data.mcp).toBe('/mcp');
+    // The connect page surfaces the /mcp server URL for users to copy.
+    const html = await res.text();
+    expect(html).toContain('/mcp');
   });
 });

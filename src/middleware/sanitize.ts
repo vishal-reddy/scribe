@@ -66,9 +66,12 @@ export function bodySizeLimit(maxBytes: number = MAX_BODY_SIZE) {
       );
     }
 
-    // Enforce by reading actual bytes when Content-Length is absent on mutating methods
+    // Enforce by reading actual bytes when Content-Length is absent on mutating
+    // methods. Read a CLONE so the original body stream stays intact for the
+    // route's JSON parser/validator (otherwise the body is consumed here and
+    // downstream reads fail with "Malformed JSON").
     if (!contentLength && ['POST', 'PUT', 'PATCH'].includes(c.req.method)) {
-      const buf = await c.req.raw.arrayBuffer();
+      const buf = await c.req.raw.clone().arrayBuffer();
       if (buf.byteLength > maxBytes) {
         throw new AppError(
           ErrorCode.VALIDATION_ERROR,
@@ -76,8 +79,6 @@ export function bodySizeLimit(maxBytes: number = MAX_BODY_SIZE) {
           `Request body too large. Maximum size is ${Math.round(maxBytes / 1024)}KB.`
         );
       }
-      // Cache the buffer so downstream body reads don't fail on consumed stream
-      (c.req as any)._arrayBuffer = buf;
     }
 
     await next();

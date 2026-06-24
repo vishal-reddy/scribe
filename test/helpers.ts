@@ -17,26 +17,54 @@ export function getAuthHeaders(email?: string): Record<string, string> {
 }
 
 /**
- * Apply D1 database migrations to create the required tables
+ * The server-side userId for an email — mirrors auth middleware's hashEmail
+ * (hex SHA-256 of the lowercased, trimmed email). Useful for seeding rows owned
+ * by the authenticated test user.
+ */
+export async function userIdFor(email = 'test@example.com'): Promise<string> {
+  const data = new TextEncoder().encode(email.toLowerCase().trim());
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// Load the real migration SQL at build time (vite raw glob) so the test schema
+// always matches production — no hand-maintained DDL to drift.
+const migrationFiles = import.meta.glob('../src/db/migrations/*.sql', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+/** Split a migration file into individual SQL statements. Handles both the
+ *  drizzle `--> statement-breakpoint` separator and plain `;`-terminated SQL. */
+function splitStatements(sql: string): string[] {
+  return sql
+    .replace(/^\s*--.*$/gm, '') // strip comment lines first (incl. drizzle's `--> statement-breakpoint`)
+    .split(';')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Apply the real D1 migrations (in order) to a fresh test database, so tests
+ * run against the exact production schema (documents, note_links, note_tags,
+ * oauth, web_sessions, feed_posts, feed_queued_at, …).
  */
 export async function applyMigrations(db: D1Database): Promise<void> {
-  await db.prepare(
-    'CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY NOT NULL, email text NOT NULL, name text, created_at integer NOT NULL, last_login_at integer, session_token text, session_expires_at integer, otp_code text, otp_expires_at integer, is_verified integer DEFAULT false)'
-  ).run();
-
-  await db.prepare(
-    'CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email)'
-  ).run();
-
-  await db.prepare(
-    'CREATE TABLE IF NOT EXISTS documents (id text PRIMARY KEY NOT NULL, title text NOT NULL, content text NOT NULL, markdown text NOT NULL, created_at integer NOT NULL, updated_at integer NOT NULL, created_by text NOT NULL, last_edited_by text NOT NULL, user_id text)'
-  ).run();
-
-  await db.prepare(
-    'CREATE TABLE IF NOT EXISTS document_versions (id text PRIMARY KEY NOT NULL, document_id text NOT NULL, version integer NOT NULL, content text NOT NULL, markdown text NOT NULL, created_at integer NOT NULL, created_by text NOT NULL, FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE)'
-  ).run();
-
-  await db.prepare(
-    'CREATE TABLE IF NOT EXISTS claude_interactions (id text PRIMARY KEY NOT NULL, document_id text, prompt text NOT NULL, response text NOT NULL, operation text NOT NULL, created_at integer NOT NULL, FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL)'
-  ).run();
+  const paths = Object.keys(migrationFiles).sort();
+  for (const path of paths) {
+    for (const stmt of splitStatements(migrationFiles[path])) {
+      try {
+        await db.prepare(stmt).run();
+      } catch (err) {
+        // Idempotent: ignore "already exists" / "duplicate column" on re-runs.
+        const msg = String((err as Error)?.message ?? err).toLowerCase();
+        if (!msg.includes('already exists') && !msg.includes('duplicate column')) {
+          throw err;
+        }
+      }
+    }
+  }
 }

@@ -214,6 +214,7 @@ documents.post('/', zValidator('json', createDocumentSchema), async (c) => {
       createdBy: 'user',
       lastEditedBy: 'user',
       userId: c.get('userId'),
+      feedQueuedAt: now, // queue for a learning-feed post (see list_notes_needing_feed)
     };
 
     await db.insert(schema.documents).values(newDoc);
@@ -265,6 +266,12 @@ documents.patch('/:id', zValidator('json', updateDocumentSchema), async (c) => {
     if (data.title) updates.title = data.title;
     if (data.content !== undefined) updates.content = data.content;
     if (data.markdown !== undefined) updates.markdown = data.markdown;
+
+    // Re-queue for a feed post when the readable content changes (title/markdown),
+    // not on content-only (CRDT state) syncs. Re-queuing is idempotent.
+    if (data.title || data.markdown !== undefined) {
+      updates.feedQueuedAt = new Date();
+    }
 
     await db
       .update(schema.documents)

@@ -183,11 +183,12 @@ app.use('*', async (c, next) => {
   })(c, next);
 });
 
-// Security headers — disable CSP and CORP for API routes (conflicts with CORS)
+// Security headers — disable CORP/COEP/COOP for API routes (conflicts with CORS).
+// CSP is not set by hono's secureHeaders unless directives are provided, so we
+// simply omit it (passing `false` is rejected by the types and is redundant).
 app.use(
   '*',
   secureHeaders({
-    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: false,
     crossOriginOpenerPolicy: false,

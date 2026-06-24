@@ -30,11 +30,15 @@ export const documents = sqliteTable('documents', {
   userId: text('user_id'), // FK to users.id — null for legacy docs
   parentId: text('parent_id').references((): AnySQLiteColumn => documents.id, { onDelete: 'set null' }), // folder hierarchy
   sortKey: text('sort_key'), // manual ordering among siblings
+  // Set when the note is created/edited; cleared once Claude generates a feed
+  // post for it. NULL = no pending feed work. Drives list_notes_needing_feed.
+  feedQueuedAt: integer('feed_queued_at', { mode: 'timestamp' }),
 }, (table) => [
   index('idx_documents_updated_at').on(table.updatedAt),
   index('idx_documents_created_by').on(table.createdBy),
   index('idx_documents_user_id').on(table.userId),
   index('idx_documents_parent_id').on(table.parentId),
+  index('idx_documents_feed_queued_at').on(table.feedQueuedAt),
 ]);
 
 // Zettelkasten links between documents (parsed [[wikilinks]] + manual links)

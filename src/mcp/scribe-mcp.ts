@@ -2,7 +2,7 @@ import { McpAgent } from "agents/mcp";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, like, or, desc, sql } from "drizzle-orm";
+import { eq, like, or, desc, sql, isNotNull, asc } from "drizzle-orm";
 import * as schema from "../db/schema";
 import type { Env } from "../types";
 import { reparseDocument, rebindLinksToTitle } from "../services/notes";
@@ -158,6 +158,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
         updatedAt: now,
         createdBy: "claude",
         lastEditedBy: "claude",
+        feedQueuedAt: now, // queue for a learning-feed post
       };
 
       await db.insert(schema.documents).values(newDoc);
@@ -279,6 +280,8 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
       };
       if (title) updates.title = title;
       if (content !== undefined) updates.markdown = content;
+      // Re-queue for a feed post when the readable content changes.
+      if (title || content !== undefined) updates.feedQueuedAt = new Date();
 
       await db
         .update(schema.documents)
@@ -493,13 +496,67 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
 
       await db.insert(schema.feedPosts).values(rows);
 
+      // Dequeue every note we made a post for, so it drops out of
+      // list_notes_needing_feed (a later edit re-queues it).
+      const coveredDocIds = [...new Set(rows.map((r) => r.sourceDocumentId).filter((id): id is string => id != null))];
+      for (const docId of coveredDocIds) {
+        await db
+          .update(schema.documents)
+          .set({ feedQueuedAt: null })
+          .where(eq(schema.documents.id, docId));
+      }
+
       return {
         content: [
           {
             type: "text" as const,
             text:
-              `Published ${rows.length} post(s) to the learning feed. ` +
-              `They'll appear in the user's Feed tab, newest first.`,
+              `Published ${rows.length} post(s) to the learning feed` +
+              (coveredDocIds.length ? ` and cleared ${coveredDocIds.length} note(s) from the feed queue` : "") +
+              `. They'll appear in the user's Feed tab, newest first.`,
+          },
+        ],
+      };
+    });
+
+    this.server.registerTool("list_notes_needing_feed", {
+      description:
+        "List notes that have been created or edited but don't have a learning-feed post yet " +
+        "(the feed auto-queue). Use this to drive the feed: read each note, then call " +
+        "create_feed_posts with snippets that reinforce it — that automatically clears the note " +
+        "from this queue. Returns oldest-queued first.",
+      inputSchema: {
+        limit: z.number().optional().describe("Max notes to return (default 25)"),
+      },
+    }, async ({ limit }) => {
+      const db = this.getDb();
+      const docs = await db
+        .select({
+          id: schema.documents.id,
+          title: schema.documents.title,
+          markdown: schema.documents.markdown,
+          feedQueuedAt: schema.documents.feedQueuedAt,
+        })
+        .from(schema.documents)
+        .where(isNotNull(schema.documents.feedQueuedAt))
+        .orderBy(asc(schema.documents.feedQueuedAt))
+        .limit(limit ?? 25);
+
+      if (docs.length === 0) {
+        return { content: [{ type: "text" as const, text: "No notes are waiting for a feed post." }] };
+      }
+
+      const lines = docs
+        .map((d) => `- ${d.id}: ${d.title}${d.markdown ? ` — ${d.markdown.slice(0, 120).replace(/\s+/g, " ")}` : ""}`)
+        .join("\n");
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `${docs.length} note(s) waiting for a feed post:\n${lines}\n\n` +
+              `Read each (read_document) and call create_feed_posts with reinforcement snippets ` +
+              `(set sourceDocumentId so they're linked and dequeued).`,
           },
         ],
       };

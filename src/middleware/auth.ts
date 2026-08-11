@@ -221,7 +221,12 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
         await next();
         return;
       }
-      // Invalid/expired token — fall through to other methods
+      // Opaque session token that didn't match or expired — this can never be a
+      // valid CF Access JWT, so fail fast instead of falling through into the
+      // JWT branch below, which 500s ("Server misconfiguration") because
+      // CF_ACCESS_TEAM_DOMAIN/CF_ACCESS_AUDIENCE are never configured for this
+      // app's actual auth model (email-OTP + session tokens, not CF Access).
+      return c.json({ error: 'Unauthorized: Invalid or expired session' }, 401);
     }
   }
 

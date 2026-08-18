@@ -211,7 +211,7 @@ app.route('/', health);
 
 app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  if (path === '/api/auth/request-otp' || path === '/api/auth/verify-otp') {
+  if (path === '/api/auth/request-otp' || path === '/api/auth/verify-otp' || path === '/api/auth/refresh') {
     return next();
   }
   return authMiddleware(c, next);

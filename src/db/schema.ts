@@ -7,14 +7,17 @@ export const users = sqliteTable('users', {
   name: text('name'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   lastLoginAt: integer('last_login_at', { mode: 'timestamp' }),
-  sessionToken: text('session_token'), // hashed session token
+  sessionToken: text('session_token'), // hashed access token (short-lived)
   sessionExpiresAt: integer('session_expires_at', { mode: 'timestamp' }),
+  refreshToken: text('refresh_token'), // hashed refresh token — rotates on each use
+  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
   otpCode: text('otp_code'), // hashed OTP for email verification
   otpExpiresAt: integer('otp_expires_at', { mode: 'timestamp' }),
   isVerified: integer('is_verified', { mode: 'boolean' }).default(false),
 }, (table) => [
   index('idx_users_email').on(table.email),
   index('idx_users_session_token').on(table.sessionToken),
+  index('idx_users_refresh_token').on(table.refreshToken),
 ]);
 
 // Documents table - stores user documents with CRDT state

@@ -52,13 +52,37 @@ async function sha256(input: string): Promise<string> {
     .join('');
 }
 
-// Generate a cryptographically secure session token
+// Generate a cryptographically secure session/refresh token
 function generateSessionToken(): string {
   const array = new Uint8Array(32);
   crypto.getRandomValues(array);
   return Array.from(array)
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days, sliding (renewed on each refresh)
+
+/** Mints a fresh access + refresh token pair and persists both (hashed) on the user row. */
+async function issueTokenPair(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: string
+): Promise<{ token: string; refreshToken: string; expiresAt: Date; refreshExpiresAt: Date }> {
+  const token = generateSessionToken();
+  const refreshToken = generateSessionToken();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ACCESS_TOKEN_TTL_MS);
+  const refreshExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_MS);
+
+  await db.update(schema.users).set({
+    sessionToken: await sha256(token),
+    sessionExpiresAt: expiresAt,
+    refreshToken: await sha256(refreshToken),
+    refreshTokenExpiresAt: refreshExpiresAt,
+  }).where(eq(schema.users.id, userId));
+
+  return { token, refreshToken, expiresAt, refreshExpiresAt };
 }
 
 const requestOtpSchema = z.object({
@@ -208,36 +232,76 @@ auth.post('/verify-otp', zValidator('json', verifyOtpSchema), async (c) => {
       return c.json({ error: 'Invalid code' }, 401);
     }
 
-    // Generate session token
-    const sessionToken = generateSessionToken();
-    const sessionHash = await sha256(sessionToken);
+    // Clear OTP, mark verified — token pair issued separately below.
     const now = new Date();
-    const sessionExpires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
-
-    // Update user: clear OTP, set session, mark verified
     await db.update(schema.users).set({
       otpCode: null,
       otpExpiresAt: null,
-      sessionToken: sessionHash,
-      sessionExpiresAt: sessionExpires,
       isVerified: true,
       lastLoginAt: now,
       name: user.name || email.split('@')[0],
     }).where(eq(schema.users.id, user.id));
 
+    const { token, refreshToken, expiresAt } = await issueTokenPair(db, user.id);
+
     return c.json({
       success: true,
-      token: sessionToken,
+      token,
+      refreshToken,
       user: {
         id: user.id,
         email: user.email,
         name: user.name || email.split('@')[0],
       },
-      expiresAt: sessionExpires.toISOString(),
+      expiresAt: expiresAt.toISOString(),
     });
   } catch (error) {
     console.error('Error verifying OTP:', error);
     return c.json({ error: 'Verification failed' }, 500);
+  }
+});
+
+const refreshSchema = z.object({
+  refreshToken: z.string().min(32).max(128),
+});
+
+/**
+ * Exchange a refresh token for a new access + refresh token pair (rotation —
+ * the old refresh token stops working the moment this succeeds). Called
+ * transparently by the client when an access token has expired; the user
+ * never sees this.
+ * POST /api/auth/refresh
+ */
+auth.post('/refresh', zValidator('json', refreshSchema), async (c) => {
+  const { refreshToken } = c.req.valid('json');
+  const db = drizzle(c.env.DB, { schema });
+
+  try {
+    const tokenHash = await sha256(refreshToken);
+
+    // Rate-limit per token hash — blunts brute-force without needing the raw token.
+    const limit = await d1RateLimit(c.env.DB, `refresh:${tokenHash}`, 10, 60_000);
+    if (!limit.allowed) {
+      return c.json({ error: 'Too many refresh attempts.' }, 429, { 'Retry-After': String(limit.retryAfterSec) });
+    }
+
+    const user = await db.select().from(schema.users).where(eq(schema.users.refreshToken, tokenHash)).get();
+
+    if (!user || !user.refreshTokenExpiresAt || user.refreshTokenExpiresAt < new Date()) {
+      return c.json({ error: 'Invalid or expired refresh token' }, 401);
+    }
+
+    const { token, refreshToken: newRefreshToken, expiresAt } = await issueTokenPair(db, user.id);
+
+    return c.json({
+      success: true,
+      token,
+      refreshToken: newRefreshToken,
+      expiresAt: expiresAt.toISOString(),
+    });
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    return c.json({ error: 'Refresh failed' }, 500);
   }
 });
 
@@ -272,6 +336,8 @@ auth.post('/logout', async (c) => {
     await db.update(schema.users).set({
       sessionToken: null,
       sessionExpiresAt: null,
+      refreshToken: null,
+      refreshTokenExpiresAt: null,
     }).where(eq(schema.users.id, userId));
 
     return c.json({ success: true, message: 'Logged out' });

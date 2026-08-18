@@ -33,13 +33,28 @@ export const documents = sqliteTable('documents', {
   // Set when the note is created/edited; cleared once Claude generates a feed
   // post for it. NULL = no pending feed work. Drives list_notes_needing_feed.
   feedQueuedAt: integer('feed_queued_at', { mode: 'timestamp' }),
+  // Ephemeral notes (e.g. MCP quick-notes): auto-deleted by the daily sweep
+  // once expiresAt passes, unless the user converts it via POST /persist
+  // (which clears both fields). isEphemeral false / expiresAt null = normal.
+  isEphemeral: integer('is_ephemeral', { mode: 'boolean' }).notNull().default(false),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }),
 }, (table) => [
   index('idx_documents_updated_at').on(table.updatedAt),
   index('idx_documents_created_by').on(table.createdBy),
   index('idx_documents_user_id').on(table.userId),
   index('idx_documents_parent_id').on(table.parentId),
   index('idx_documents_feed_queued_at').on(table.feedQueuedAt),
+  index('idx_documents_expires_at').on(table.expiresAt),
 ]);
+
+// Small generic key/value store for app-wide settings (e.g. the default
+// ephemeral-note TTL). Not per-user — see appSettings usage in
+// src/routes/settings.ts and the create_ephemeral_note MCP tool for why.
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
 
 // Zettelkasten links between documents (parsed [[wikilinks]] + manual links)
 export const noteLinks = sqliteTable('note_links', {
@@ -131,3 +146,5 @@ export type NoteTag = typeof noteTags.$inferSelect;
 export type NewNoteTag = typeof noteTags.$inferInsert;
 export type FeedPost = typeof feedPosts.$inferSelect;
 export type NewFeedPost = typeof feedPosts.$inferInsert;
+export type AppSetting = typeof appSettings.$inferSelect;
+export type NewAppSetting = typeof appSettings.$inferInsert;

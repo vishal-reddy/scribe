@@ -54,6 +54,8 @@ documents.get('/search', async (c) => {
         updatedAt: schema.documents.updatedAt,
         createdBy: schema.documents.createdBy,
         lastEditedBy: schema.documents.lastEditedBy,
+        isEphemeral: schema.documents.isEphemeral,
+        expiresAt: schema.documents.expiresAt,
         // Title matches rank higher (2) than content matches (1)
         relevance: sql<number>`(CASE WHEN ${schema.documents.title} LIKE ${pattern} THEN 2 ELSE 0 END) + (CASE WHEN ${schema.documents.markdown} LIKE ${pattern} THEN 1 ELSE 0 END)`.as('relevance'),
       })
@@ -117,6 +119,8 @@ documents.get('/', async (c) => {
         lastEditedBy: schema.documents.lastEditedBy,
         parentId: schema.documents.parentId,
         sortKey: schema.documents.sortKey,
+        isEphemeral: schema.documents.isEphemeral,
+        expiresAt: schema.documents.expiresAt,
       })
       .from(schema.documents)
       .where(ownershipFilter)
@@ -455,6 +459,48 @@ documents.post('/:id/move', async (c) => {
     if (e instanceof Error && /cycle/i.test(e.message)) return c.json({ error: e.message }, 400);
     console.error('move error', e);
     return c.json({ error: 'Failed to move document' }, 500);
+  }
+});
+
+/**
+ * Convert an ephemeral note to a permanent one — clears isEphemeral/expiresAt
+ * so it survives the daily expiry sweep.
+ * POST /api/documents/:id/persist
+ */
+documents.post('/:id/persist', async (c) => {
+  const db = drizzle(c.env.DB, { schema });
+  const documentId = c.req.param('id');
+  const userId = c.get('userId');
+
+  try {
+    const existing = await db
+      .select()
+      .from(schema.documents)
+      .where(eq(schema.documents.id, documentId))
+      .get();
+
+    if (!existing) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+    if (existing.userId && existing.userId !== userId) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
+    await db
+      .update(schema.documents)
+      .set({ isEphemeral: false, expiresAt: null, updatedAt: new Date() })
+      .where(eq(schema.documents.id, documentId));
+
+    const doc = await db
+      .select()
+      .from(schema.documents)
+      .where(eq(schema.documents.id, documentId))
+      .get();
+
+    return c.json({ document: doc });
+  } catch (error) {
+    console.error('Error persisting document:', error);
+    return c.json({ error: 'Failed to persist document' }, 500);
   }
 });
 

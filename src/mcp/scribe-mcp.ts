@@ -6,6 +6,7 @@ import { eq, like, or, desc, sql, isNotNull, asc } from "drizzle-orm";
 import * as schema from "../db/schema";
 import type { Env } from "../types";
 import { reparseDocument, rebindLinksToTitle } from "../services/notes";
+import { getEphemeralTtlDays, expiresAtFromNow } from "../services/ephemeral";
 import {
   TAXONOMY_GUIDANCE,
   TAXONOMY_CATEGORIES,
@@ -16,10 +17,31 @@ import {
 type State = {};
 
 export class ScribeMCP extends McpAgent<Env, State, {}> {
-  server = new McpServer({
-    name: "Scribe",
-    version: "1.0.0",
-  });
+  server = new McpServer(
+    {
+      name: "Scribe",
+      version: "1.0.0",
+    },
+    {
+      // Surfaced to the client/model during `initialize`. This orients tool
+      // discovery: when several connected MCP servers all traffic in
+      // "documents"/"notes", these instructions tell the model that the user's
+      // personal notes/writing live in Scribe and which tool to reach for.
+      instructions:
+        "Scribe is the user's personal note-taking and writing app. It is the source of truth for " +
+        "the user's own notes, documents, and writing — in Scribe the words \"note\" and \"document\" " +
+        "mean the same thing. Use these tools whenever the user asks to see, list, browse, search, read, " +
+        "create, or edit THEIR notes/documents/writing (e.g. \"list my Scribe documents\", \"show my " +
+        "notes\", \"find my note about X\", \"add a note\"). Prefer Scribe over generic file/drive/email " +
+        "tools for anything the user calls their notes, their documents, or their writing.\n\n" +
+        "Typical flow: `list_documents` or `search_documents` to find a note, `read_document` to read one, " +
+        "`create_document`/`update_document` to write. New documents should then be classified with " +
+        "`list_categories` and filed with `file_document`; `list_unfiled_documents` finds ones still " +
+        "needing filing. The learning feed (`list_notes_needing_feed` + `create_feed_posts`) turns notes " +
+        "into spaced-repetition study prompts. For reminders/scratch notes meant to self-delete, use " +
+        "`create_ephemeral_note` instead of `create_document`.",
+    }
+  );
 
   initialState: State = {};
 
@@ -90,7 +112,20 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     // ── Tools ──────────────────────────────────────────────────────────
 
     this.server.registerTool("list_documents", {
-      description: "List all user documents in Scribe",
+      title: "List Scribe documents",
+      description:
+        "List all of the user's documents (a.k.a. notes) in Scribe, newest-edited first. " +
+        "Use this whenever the user asks to see, show, list, or browse their Scribe documents, " +
+        "notes, or writing — e.g. \"list my Scribe documents\", \"show my notes\", \"what notes do I " +
+        "have\". Returns each document's id, title, and timestamps (not its body — use read_document " +
+        "for the content). Takes no arguments.",
+      inputSchema: {},
+      annotations: {
+        title: "List Scribe documents",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     }, async () => {
       const db = this.getDb();
       const docs = await db
@@ -112,8 +147,18 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("read_document", {
-      description: "Read the content of a specific document",
+      title: "Read a Scribe document",
+      description:
+        "Read the full title and markdown content of one of the user's Scribe documents (notes). " +
+        "Use this to open or read a specific note once you have its id (from list_documents or " +
+        "search_documents) — e.g. \"read my note about X\", \"open that document\".",
       inputSchema: { documentId: z.string().describe("The ID of the document to read") },
+      annotations: {
+        title: "Read a Scribe document",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     }, async ({ documentId }) => {
       const db = this.getDb();
       const doc = await db
@@ -137,12 +182,22 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("create_document", {
+      title: "Create a Scribe document",
       description:
-        "Create a new document in Scribe. After creating, classify the document into the " +
+        "Create a new document (note) in the user's Scribe. Use this when the user asks to add, " +
+        "create, write, save, or jot down a note/document — e.g. \"add a note about X\", \"save this " +
+        "to Scribe\", \"start a new document\". After creating, classify the document into the " +
         "Thomistic taxonomy and file it by calling file_document with the returned document ID.",
       inputSchema: {
         title: z.string().describe("The title of the new document"),
         content: z.string().describe("The markdown content of the document"),
+      },
+      annotations: {
+        title: "Create a Scribe document",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
     }, async ({ title, content }) => {
       const db = this.getDb();
@@ -179,29 +234,109 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
       };
     });
 
+    this.server.registerTool("create_ephemeral_note", {
+      title: "Create an ephemeral Scribe note",
+      description:
+        "Create a throwaway/quick note in the user's Scribe that self-deletes after a TTL " +
+        "(app-wide default, currently configured in the user's Settings; pass ttlDays to override " +
+        "for just this note). It appears in the regular document list like any other note, and the " +
+        "user can tap \"Make permanent\" in the app to keep it forever — otherwise it (and any " +
+        "learning-feed post generated from it) is deleted once it expires. Use this for reminders, " +
+        "scratch notes, or anything explicitly temporary; use create_document for anything meant to " +
+        "last.",
+      inputSchema: {
+        title: z.string().describe("The title of the new note"),
+        content: z.string().describe("The markdown content of the note"),
+        ttlDays: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Days until this note expires. Defaults to the app-wide setting (usually 30)."),
+      },
+      annotations: {
+        title: "Create an ephemeral Scribe note",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    }, async ({ title, content, ttlDays }) => {
+      const db = this.getDb();
+      const documentId = crypto.randomUUID();
+      const now = new Date();
+      const effectiveTtlDays = ttlDays ?? (await getEphemeralTtlDays(this.env));
+      const expiresAt = expiresAtFromNow(effectiveTtlDays);
+
+      const newDoc: schema.NewDocument = {
+        id: documentId,
+        title,
+        content: "",
+        markdown: content || "",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "claude",
+        lastEditedBy: "claude",
+        feedQueuedAt: now, // queue for a learning-feed post
+        isEphemeral: true,
+        expiresAt,
+      };
+
+      await db.insert(schema.documents).values(newDoc);
+      await reparseDocument(db, documentId, newDoc.markdown ?? "");
+      await rebindLinksToTitle(db, documentId, title);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              `Ephemeral note created!\nID: ${documentId}\nTitle: ${title}\n` +
+              `Expires: ${expiresAt.toISOString()} (${effectiveTtlDays} days) unless the user makes it permanent in the app.`,
+          },
+        ],
+      };
+    });
+
     // ── Auto-organization (Thomistic taxonomy) ───────────────────────────
     // Classification uses the user's Claude subscription: Claude picks the
     // category here in the MCP session; the server only does the filing.
 
     this.server.registerTool("list_categories", {
+      title: "List Scribe taxonomy categories",
       description:
-        "List the Thomistic taxonomy of the sciences and arts used to organize documents. " +
-        "Use this to choose a category before calling file_document.",
+        "List the Thomistic taxonomy of the sciences and arts used to organize Scribe documents. " +
+        "Use this to choose a category before calling file_document. Takes no arguments.",
       inputSchema: {},
+      annotations: {
+        title: "List Scribe taxonomy categories",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     }, async () => ({
       content: [{ type: "text" as const, text: TAXONOMY_GUIDANCE }],
     }));
 
     this.server.registerTool("file_document", {
+      title: "File a Scribe document under a category",
       description:
-        "File a document under its Thomistic taxonomy category. Creates the category folder " +
-        "(and its parent division) if needed and sets the document's parent. Call this after " +
-        "classifying a document with the taxonomy from list_categories.",
+        "File a Scribe document (note) under its Thomistic taxonomy category — i.e. organize/move it " +
+        "into the right folder. Creates the category folder (and its parent division) if needed and " +
+        "sets the document's parent. Call this after classifying a document with the taxonomy from " +
+        "list_categories.",
       inputSchema: {
         documentId: z.string().describe("The ID of the document to file"),
         category: z
           .string()
           .describe(`The taxonomy leaf to file under. One of: ${TAXONOMY_CATEGORIES.join(", ")}`),
+      },
+      annotations: {
+        title: "File a Scribe document under a category",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     }, async ({ documentId, category }) => {
       const db = this.getDb();
@@ -227,11 +362,19 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("list_unfiled_documents", {
+      title: "List unfiled Scribe documents",
       description:
-        "List documents that have not been filed under any folder yet (e.g. notes created in the " +
-        "mobile app). Use this to find documents to classify and file with file_document.",
+        "List the user's Scribe documents (notes) that have not been filed under any folder yet " +
+        "(e.g. notes created in the mobile app) — the ones still needing to be organized. Use this to " +
+        "find documents to classify and file with file_document.",
       inputSchema: {
         limit: z.number().optional().describe("Max documents to return (default 50)"),
+      },
+      annotations: {
+        title: "List unfiled Scribe documents",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     }, async ({ limit }) => {
       const db = this.getDb();
@@ -253,11 +396,23 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("update_document", {
-      description: "Update an existing document's title and/or content",
+      title: "Update a Scribe document",
+      description:
+        "Update an existing Scribe document (note): change its title and/or replace its markdown " +
+        "content. Use this when the user asks to edit, rewrite, append to, or change one of their " +
+        "notes/documents. Content, when provided, REPLACES the existing body — read_document first if " +
+        "you need to preserve or extend the current text.",
       inputSchema: {
         documentId: z.string().describe("The ID of the document to update"),
         title: z.string().optional().describe("New title (optional)"),
         content: z.string().optional().describe("New markdown content (optional)"),
+      },
+      annotations: {
+        title: "Update a Scribe document",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     }, async ({ documentId, title, content }) => {
       const db = this.getDb();
@@ -296,9 +451,19 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("search_documents", {
-      description: "Search documents by title or content",
+      title: "Search Scribe documents",
+      description:
+        "Search the user's Scribe documents (notes) by keyword in their title or body, returning " +
+        "matches with a short preview. Use this when the user wants to find a specific note/document " +
+        "or everything mentioning a topic — e.g. \"find my note about X\", \"search my Scribe for Y\".",
       inputSchema: {
         query: z.string().describe("Search query string"),
+      },
+      annotations: {
+        title: "Search Scribe documents",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     }, async ({ query }) => {
       const db = this.getDb();
@@ -337,9 +502,18 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("get_document_versions", {
-      description: "Get version history for a document",
+      title: "Get Scribe document version history",
+      description:
+        "Get the version history (saved snapshots) of one of the user's Scribe documents (notes). " +
+        "Use this to review past revisions of a note. Returns version numbers, timestamps, and authors.",
       inputSchema: {
         documentId: z.string().describe("The ID of the document"),
+      },
+      annotations: {
+        title: "Get Scribe document version history",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     }, async ({ documentId }) => {
       const db = this.getDb();
@@ -370,9 +544,20 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("create_version_snapshot", {
-      description: "Create a version snapshot of a document",
+      title: "Snapshot a Scribe document",
+      description:
+        "Save a version snapshot of one of the user's Scribe documents (notes), capturing its current " +
+        "content so it can be restored or compared later. Use this before making large edits, or when " +
+        "the user asks to checkpoint/save a version of a note.",
       inputSchema: {
         documentId: z.string().describe("The ID of the document to snapshot"),
+      },
+      annotations: {
+        title: "Snapshot a Scribe document",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
     }, async ({ documentId }) => {
       const db = this.getDb();
@@ -430,6 +615,14 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     // app renders them.
 
     this.server.registerTool("create_feed_posts", {
+      title: "Publish learning-feed posts",
+      annotations: {
+        title: "Publish learning-feed posts",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
       description:
         "Populate the user's learning feed — a simulated, Twitter-like feed in the Scribe app whose " +
         "real purpose is REINFORCEMENT LEARNING: helping the user remember and deepen their own notes. " +
@@ -545,6 +738,13 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     });
 
     this.server.registerTool("list_notes_needing_feed", {
+      title: "List notes needing a feed post",
+      annotations: {
+        title: "List notes needing a feed post",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       description:
         "List notes that have been created or edited but don't have a learning-feed post yet " +
         "(the feed auto-queue). Use this to drive the feed: read each note (read_document), then call " +

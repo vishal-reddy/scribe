@@ -12,6 +12,7 @@ import sync from './routes/sync';
 import documents from './routes/documents';
 import feed from './routes/feed';
 import tags from './routes/tags';
+import settings from './routes/settings';
 import claude from './routes/claude';
 import auth from './routes/auth';
 import { oauthRoute } from './routes/oauth';
@@ -19,6 +20,7 @@ import { webAuthRoute } from './routes/web-auth';
 import { ScribeMCP } from './mcp/scribe-mcp';
 import { authenticateAccessToken, authorizationServerMetadata, protectedResourceMetadata } from './lib/oauth';
 import { readSession } from './lib/session';
+import { expireEphemeralDocuments } from './services/ephemeral';
 import { renderConnectPage } from './web/connectPage';
 import type { SessionData } from './lib/session';
 import type { Env } from './types';
@@ -232,6 +234,7 @@ app.use('/api/documents/*', documentRateLimit);
 app.route('/api/documents', documents);
 app.route('/api/feed', feed);
 app.route('/api/tags', tags);
+app.route('/api/settings', settings);
 app.use('/api/claude/*', claudeRateLimit);
 app.route('/api/claude', claude);
 app.route('/auth', webAuthRoute);
@@ -304,6 +307,10 @@ export default {
     }
 
     return app.fetch(request, env, ctx);
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(expireEphemeralDocuments(env));
   },
 };
 

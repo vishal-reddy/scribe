@@ -10,6 +10,10 @@ routes = [
 [observability]
 enabled = true
 
+[triggers]
+# Daily sweep: delete expired ephemeral notes (and their sourced feed posts).
+crons = ["0 6 * * *"]
+
 [vars]
 ENVIRONMENT = "production"
 EMAIL_FROM = "Scribe <no-reply@kecker.co>"

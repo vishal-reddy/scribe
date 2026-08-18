@@ -288,4 +288,48 @@ describe('Document CRUD API', () => {
       expect(res.status).toBe(404);
     });
   });
+
+  describe('POST /api/documents/:id/persist', () => {
+    async function insertEphemeralDoc(): Promise<string> {
+      const id = crypto.randomUUID();
+      // Drizzle's sqlite {mode: 'timestamp'} stores whole seconds, not ms.
+      const now = Math.floor(Date.now() / 1000);
+      await env.DB.prepare(
+        `INSERT INTO documents (id, title, content, markdown, created_at, updated_at, created_by, last_edited_by, is_ephemeral, expires_at)
+         VALUES (?, ?, '', 'body', ?, ?, 'claude', 'claude', 1, ?)`
+      ).bind(id, 'Ephemeral doc', now, now, now + 60 * 60 * 24 * 30).run();
+      return id;
+    }
+
+    it('should require authentication', async () => {
+      const res = await app.request('/api/documents/some-id/persist', { method: 'POST' }, env);
+      expect(res.status).toBe(401);
+    });
+
+    it('should return 404 for a non-existent document', async () => {
+      const res = await app.request('/api/documents/non-existent-id/persist', {
+        method: 'POST',
+        headers: authHeaders,
+      }, env);
+      expect(res.status).toBe(404);
+    });
+
+    it('should clear isEphemeral and expiresAt', async () => {
+      const id = await insertEphemeralDoc();
+
+      const res = await app.request(`/api/documents/${id}/persist`, {
+        method: 'POST',
+        headers: authHeaders,
+      }, env);
+
+      expect(res.status).toBe(200);
+      const data: any = await res.json();
+      expect(data.document.isEphemeral).toBe(false);
+      expect(data.document.expiresAt).toBeNull();
+
+      const getRes = await app.request(`/api/documents/${id}`, { headers: authHeaders }, env);
+      const getData: any = await getRes.json();
+      expect(getData.document.isEphemeral).toBe(false);
+    });
+  });
 });

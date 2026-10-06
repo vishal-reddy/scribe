@@ -278,8 +278,11 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
       const audience = c.env.CF_ACCESS_AUDIENCE;
 
       if (!teamDomain || !audience) {
-        console.error('Missing CF_ACCESS_TEAM_DOMAIN or CF_ACCESS_AUDIENCE');
-        return c.json({ error: 'Server misconfiguration' }, 500);
+        // Not configured for this app's auth model (Kinde/email-OTP, not CF Access).
+        // A caller presenting a token we cannot verify is unauthorized, not a server
+        // error, so answer 401. Log so the misconfiguration is still visible.
+        console.error('CF Access not configured; rejecting bearer token that is not a Kinde or session token');
+        return c.json({ error: 'Unauthorized: Invalid token' }, 401);
       }
 
       const parsed = parseJWTUnverified(token);

@@ -15,6 +15,13 @@ export interface Env {
   MCP_AUTH_TOKEN?: string;
   SCRIBE_API_KEY?: string;
   OAUTH_PEPPER: string;
+  /** Shared Kinde business every Kecker.co app authenticates against. */
+  KINDE_DOMAIN: string;
+  /** "Scribe Web" Kinde application — used by the backend-hosted /auth/kinde/* login (consent-flow gate). iOS talks to its own "Scribe iOS" Kinde application client-side. */
+  KINDE_CLIENT_ID: string;
+  /** The "Scribe" Kinde API's audience (https://scribe.kecker.co). */
+  KINDE_AUDIENCE: string;
+  KINDE_CLIENT_SECRET: string;
   SENTRY_DSN?: string;
   ENVIRONMENT?: string;
   ALLOWED_ORIGINS?: string;

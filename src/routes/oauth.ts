@@ -142,14 +142,22 @@ oauthRoute.get('/authorize', async (c) => {
     return redirectWithError(redirectUri, state, 'invalid_request', 'PKCE S256 required');
 
   const session = await readSession(c);
+  // No form-action restriction: this page's one form intentionally submits
+  // to /oauth/authorize and then redirects on to the client's own
+  // redirect_uri (almost always a different origin — that's the whole
+  // point of an OAuth consent screen). form-action governs redirects
+  // reached via a form submission too, so form-action 'self' here silently
+  // blocked every real client's redirect and made "Allow access" a no-op.
+  // redirect_uri is already validated server-side against the client's
+  // registered allowlist, so this isn't load-bearing for security.
+  c.header('Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; base-uri 'none'; frame-ancestors 'none'");
+  c.header('Referrer-Policy', 'no-referrer');
+
   if (!session) {
     const returnTo = '/oauth/authorize' + url.search;
-    return c.redirect('/auth/login?return_to=' + encodeURIComponent(returnTo), 302);
+    return c.redirect('/auth/kinde/login?return_to=' + encodeURIComponent(returnTo), 302);
   }
-
-  c.header('Content-Security-Policy',
-    "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
-  c.header('Referrer-Policy', 'no-referrer');
   return c.html(renderConsent({
     clientName: client.client_name || clientId,
     email: session.email,
@@ -163,7 +171,7 @@ oauthRoute.get('/authorize', async (c) => {
 
 oauthRoute.post('/authorize', async (c) => {
   const session = await readSession(c);
-  if (!session) return c.redirect('/auth/login', 302);
+  if (!session) return c.redirect('/auth/kinde/login', 302);
   const form = await c.req.parseBody();
   const decision = String(form.decision ?? '');
   const clientId = String(form.client_id ?? '');

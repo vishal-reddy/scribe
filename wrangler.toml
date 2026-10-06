@@ -20,7 +20,19 @@ EMAIL_FROM = "Scribe <no-reply@kecker.co>"
 # Comma-separated list of allowed CORS origins for production
 # ALLOWED_ORIGINS = "https://scribe.example.com"
 
+# Shared Kinde business every Kecker.co app authenticates against — see
+# ../base/apps/backend/docs/KINDE_SETUP.md for the pattern. KINDE_CLIENT_ID is
+# the "Scribe Web" application (confidential, has a secret) used only by
+# /auth/kinde/login's backend-hosted flow — iOS signs into its own
+# "Scribe iOS" Kinde application client-side and never reaches that route.
+# Android is not migrated to Kinde yet (still email-OTP, see
+# src/middleware/auth.ts).
+KINDE_DOMAIN = "https://kecker.kinde.com"
+KINDE_CLIENT_ID = "4e98217c88d24e728fc3b0c15e73e770"
+KINDE_AUDIENCE = "https://scribe.kecker.co"
+
 # In production, set via: wrangler secret put ANTHROPIC_API_KEY
+#   KINDE_CLIENT_SECRET — "Scribe Web" Kinde application's client secret
 # For local dev, add to .dev.vars file
 
 [[durable_objects.bindings]]

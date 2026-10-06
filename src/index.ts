@@ -35,7 +35,7 @@ function renderLandingPage(session: SessionData | null): string {
 
   const navRight = session
     ? `<a href="/connect" class="nav-link">Connect Claude</a><span class="nav-email">${_esc(session.email)}</span><a href="/auth/logout" class="nav-ghost">Sign out</a>`
-    : `<a href="/connect" class="nav-link">Connect Claude</a><a href="/auth/login" class="nav-link">Sign in</a><a href="/auth/register" class="nav-btn">Get started</a>`;
+    : `<a href="/connect" class="nav-link">Connect Claude</a><a href="/auth/kinde/login" class="nav-link">Sign in</a><a href="/auth/kinde/login" class="nav-btn">Get started</a>`;
 
   const heroCta = session
     ? `<a href="/connect" class="btn-primary connect-cta">Connect Claude to Scribe →</a>
@@ -48,7 +48,7 @@ function renderLandingPage(session: SessionData | null): string {
       </div>`
     : `<div class="hero-cta">
         <a href="/connect" class="btn-primary">Connect Claude →</a>
-        <a href="/auth/register" class="btn-secondary">Create account</a>
+        <a href="/auth/kinde/login" class="btn-secondary">Create account</a>
       </div>`;
 
   return `<!doctype html>
@@ -150,7 +150,7 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
   <div class="footer-links">
     <a href="/health">Status</a>
     <a href="/.well-known/oauth-authorization-server">OAuth</a>
-    <a href="/auth/login">Sign in</a>
+    <a href="/auth/kinde/login">Sign in</a>
   </div>
 </footer>
 </body>

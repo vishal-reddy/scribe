@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../types';
+import { isKindeJwt, verifyKindeAccessToken, userIdForIdentity } from '../lib/kinde';
 
 // --- JWKS cache ---
 
@@ -207,8 +208,9 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
   const authHeader = c.req.header('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
-    // Skip if it looks like a JWT (has dots) — that's CF Access or dev JWT
     if (!token.includes('.')) {
+      // Opaque session token — Android's email-OTP flow (routes/auth.ts). Not
+      // migrated to Kinde yet, see lib/kinde.ts's doc comment.
       const tokenHash = await hashEmail(token); // reuse SHA-256 helper
       const db = drizzle(c.env.DB, { schema });
       const user = await db.select().from(schema.users)
@@ -227,6 +229,35 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
       // CF_ACCESS_TEAM_DOMAIN/CF_ACCESS_AUDIENCE are never configured for this
       // app's actual auth model (email-OTP + session tokens, not CF Access).
       return c.json({ error: 'Unauthorized: Invalid or expired session' }, 401);
+    }
+
+    // Has dots — could be a Kinde access token (iOS, migrated) or a Cloudflare
+    // Access JWT (the pre-existing branch below, unconfigured in this env but
+    // left intact). Route by issuer rather than assuming either.
+    if (isKindeJwt(token, c.env.KINDE_DOMAIN)) {
+      const identity = await verifyKindeAccessToken(c.env, token);
+      if (!identity) return c.json({ error: 'Unauthorized: Invalid Kinde token' }, 401);
+
+      const userId = await userIdForIdentity(identity);
+      const db = drizzle(c.env.DB, { schema });
+      const existing = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+      if (!existing) {
+        await db.insert(schema.users).values({
+          id: userId,
+          email: identity.email || `${userId}@kinde.local`,
+          createdAt: new Date(),
+          lastLoginAt: new Date(),
+          isVerified: true,
+        }).onConflictDoNothing();
+      } else if (!existing.lastLoginAt || Date.now() - existing.lastLoginAt.getTime() > 60_000) {
+        await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, userId));
+      }
+
+      c.set('userId', userId);
+      c.set('userEmail', identity.email || existing?.email || '');
+      c.set('userName', existing?.name || identity.email || userId);
+      await next();
+      return;
     }
   }
 

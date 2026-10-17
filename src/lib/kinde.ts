@@ -1,12 +1,18 @@
 import * as jose from 'jose';
+import { drizzle } from 'drizzle-orm/d1';
+import { eq } from 'drizzle-orm';
+import * as schema from '../db/schema';
 import type { Env } from '../types';
 
 /**
- * Verifies a Kinde-issued access token — the credential Scribe's iOS app
- * presents directly now (audience "https://scribe.kecker.co"), having
- * signed in with the official Kinde SDK client-side. Scribe's Android app
- * is NOT migrated yet (still email-OTP, see routes/auth.ts) — both
- * credential kinds are accepted side by side, see middleware/auth.ts.
+ * Verifies a Kinde-issued access token — the credential Scribe's iOS and
+ * Android apps both present directly now (audience
+ * "https://scribe.kecker.co"), having signed in with the official Kinde
+ * SDK client-side. The legacy email-OTP session token is still accepted
+ * alongside it (see routes/auth.ts) for accounts that haven't
+ * re-authenticated since the migration — both credential kinds are
+ * accepted side by side, see middleware/auth.ts and index.ts's MCP
+ * resolver.
  *
  * One JWKS per isolate, cached and auto-refreshed by `jose` itself.
  */
@@ -28,11 +34,18 @@ export interface KindeIdentity {
   email: string;
 }
 
+// kecker-mcp-hub forwards a Kinde access token it obtained for ITS OWN
+// audience (not this app's) when relaying an MCP tool call on a user's
+// behalf — see kecker-mcp-hub/src/routes/oauth.ts. Accepting either
+// audience lets that token verify here without the hub needing to hold (or
+// this app needing to mint) a separate per-app token.
+const HUB_AUDIENCE = 'https://mcp.kecker.co';
+
 export async function verifyKindeAccessToken(env: Env, token: string): Promise<KindeIdentity | null> {
   try {
     const { payload } = await jose.jwtVerify(token, getJwks(env.KINDE_DOMAIN), {
       issuer: env.KINDE_DOMAIN,
-      audience: env.KINDE_AUDIENCE,
+      audience: [env.KINDE_AUDIENCE, HUB_AUDIENCE],
     });
     if (typeof payload.sub !== 'string') return null;
     const email = typeof payload.email === 'string' ? payload.email : '';
@@ -59,6 +72,34 @@ export async function verifyKindeAccessToken(env: Env, token: string): Promise<K
 export async function userIdForIdentity(identity: KindeIdentity): Promise<string> {
   if (identity.email) return sha256Hex(identity.email.toLowerCase().trim());
   return `kinde_${identity.sub}`;
+}
+
+/**
+ * Resolves a verified Kinde identity to Scribe's own {userId, email},
+ * upserting the `users` row the same way for every caller of this (the REST
+ * API's middleware/auth.ts and the MCP endpoint's resolver in index.ts) —
+ * extracted here so the two call sites can't drift into resolving the same
+ * identity two different ways.
+ */
+export async function resolveAndUpsertKindeUser(
+  env: Env,
+  identity: KindeIdentity
+): Promise<{ userId: string; email: string }> {
+  const userId = await userIdForIdentity(identity);
+  const db = drizzle(env.DB, { schema });
+  const existing = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  if (!existing) {
+    await db.insert(schema.users).values({
+      id: userId,
+      email: identity.email || `${userId}@kinde.local`,
+      createdAt: new Date(),
+      lastLoginAt: new Date(),
+      isVerified: true,
+    }).onConflictDoNothing();
+  } else if (!existing.lastLoginAt || Date.now() - existing.lastLoginAt.getTime() > 60_000) {
+    await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, userId));
+  }
+  return { userId, email: identity.email || existing?.email || '' };
 }
 
 async function sha256Hex(input: string): Promise<string> {

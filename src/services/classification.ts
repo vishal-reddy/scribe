@@ -144,7 +144,8 @@ export const TAXONOMY_GUIDANCE =
   'Categories:\n' +
   taxonomyList();
 
-function ownerFilter(userId: string | null | undefined) {
+/** Exported for reuse by scribe-mcp.ts's tool handlers — same convention everywhere: a caller with no resolved userId (MCP's unscoped dev path) sees only unowned/legacy documents, never everyone's. */
+export function ownerFilter(userId: string | null | undefined) {
   if (!userId) return isNull(schema.documents.userId);
   return or(eq(schema.documents.userId, userId), isNull(schema.documents.userId));
 }

@@ -2,7 +2,7 @@ import { McpAgent } from "agents/mcp";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, like, or, desc, sql, isNotNull, asc } from "drizzle-orm";
+import { eq, like, or, and, desc, sql, isNotNull, asc } from "drizzle-orm";
 import * as schema from "../db/schema";
 import type { Env } from "../types";
 import { reparseDocument, rebindLinksToTitle } from "../services/notes";
@@ -12,11 +12,18 @@ import {
   TAXONOMY_CATEGORIES,
   fileDocumentInCategory,
   listUnfiledDocuments,
+  ownerFilter,
 } from "../services/classification";
 
 type State = {};
 
-export class ScribeMCP extends McpAgent<Env, State, {}> {
+/** Resolved once per /mcp request in index.ts's resolveMcpIdentity, attached as ctx.props before the request reaches this class. Empty userId is the dev-only unscoped path. */
+export interface ScribeMcpProps extends Record<string, unknown> {
+  userId: string;
+  email: string;
+}
+
+export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
   server = new McpServer(
     {
       name: "Scribe",
@@ -49,6 +56,17 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
     return drizzle(this.env.DB, { schema });
   }
 
+  /** '' in the dev-only unscoped path (resolveMcpIdentity in index.ts) — ownerFilter treats that as "unowned documents only", never "everyone's". */
+  private userId(): string {
+    return this.props?.userId ?? "";
+  }
+
+  /** For inserts: a real userId, or null to match the schema's NULL-means-unowned convention (never an empty string). */
+  private userIdOrNull(): string | null {
+    const id = this.userId();
+    return id || null;
+  }
+
   async init() {
     // ── Resources ──────────────────────────────────────────────────────
 
@@ -67,6 +85,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
             lastEditedBy: schema.documents.lastEditedBy,
           })
           .from(schema.documents)
+          .where(ownerFilter(this.userId()))
           .orderBy(desc(schema.documents.updatedAt));
 
         return {
@@ -93,7 +112,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
           .where(eq(schema.documents.id, String(variables.id)))
           .get();
 
-        if (!doc) {
+        if (!doc || (doc.userId && doc.userId !== this.userId())) {
           return { contents: [] };
         }
 
@@ -137,6 +156,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
           lastEditedBy: schema.documents.lastEditedBy,
         })
         .from(schema.documents)
+        .where(ownerFilter(this.userId()))
         .orderBy(desc(schema.documents.updatedAt));
 
       return {
@@ -167,7 +187,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
         .where(eq(schema.documents.id, documentId))
         .get();
 
-      if (!doc) {
+      if (!doc || (doc.userId && doc.userId !== this.userId())) {
         return {
           content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
           isError: true,
@@ -214,6 +234,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
         createdBy: "claude",
         lastEditedBy: "claude",
         feedQueuedAt: now, // queue for a learning-feed post
+        userId: this.userIdOrNull(),
       };
 
       await db.insert(schema.documents).values(newDoc);
@@ -280,6 +301,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
         feedQueuedAt: now, // queue for a learning-feed post
         isEphemeral: true,
         expiresAt,
+        userId: this.userIdOrNull(),
       };
 
       await db.insert(schema.documents).values(newDoc);
@@ -340,7 +362,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
       },
     }, async ({ documentId, category }) => {
       const db = this.getDb();
-      const result = await fileDocumentInCategory(db, documentId, category, null);
+      const result = await fileDocumentInCategory(db, documentId, category, this.userIdOrNull());
       if (!result) {
         return {
           content: [
@@ -378,7 +400,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
       },
     }, async ({ limit }) => {
       const db = this.getDb();
-      const docs = await listUnfiledDocuments(db, null, limit ?? 50);
+      const docs = await listUnfiledDocuments(db, this.userIdOrNull(), limit ?? 50);
       if (docs.length === 0) {
         return { content: [{ type: "text" as const, text: "No unfiled documents." }] };
       }
@@ -422,7 +444,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
         .where(eq(schema.documents.id, documentId))
         .get();
 
-      if (!existing) {
+      if (!existing || (existing.userId && existing.userId !== this.userId())) {
         return {
           content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
           isError: true,
@@ -476,9 +498,12 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
         })
         .from(schema.documents)
         .where(
-          or(
-            like(schema.documents.title, pattern),
-            like(schema.documents.markdown, pattern)
+          and(
+            ownerFilter(this.userId()),
+            or(
+              like(schema.documents.title, pattern),
+              like(schema.documents.markdown, pattern)
+            )
           )
         )
         .orderBy(desc(schema.documents.updatedAt));
@@ -517,6 +542,20 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
       },
     }, async ({ documentId }) => {
       const db = this.getDb();
+
+      // document_versions has no userId of its own — scoped via the parent document's.
+      const parent = await db
+        .select({ userId: schema.documents.userId })
+        .from(schema.documents)
+        .where(eq(schema.documents.id, documentId))
+        .get();
+      if (!parent || (parent.userId && parent.userId !== this.userId())) {
+        return {
+          content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
+          isError: true,
+        };
+      }
+
       const versions = await db
         .select({
           id: schema.documentVersions.id,
@@ -568,7 +607,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
         .where(eq(schema.documents.id, documentId))
         .get();
 
-      if (!doc) {
+      if (!doc || (doc.userId && doc.userId !== this.userId())) {
         return {
           content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
           isError: true,
@@ -680,26 +719,30 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
       const db = this.getDb();
       const now = new Date();
 
-      // Resolve source note titles in one pass for display + validity.
+      // Resolve source note titles in one pass for display + validity — and
+      // ownership, so a post can't be sourced from a document that isn't the
+      // caller's (same "drop it, like it didn't resolve" treatment as an
+      // unknown id, rather than a hard error over one bad item in a batch).
       const titleById = new Map<string, string | null>();
       for (const p of posts) {
         if (p.sourceDocumentId && !titleById.has(p.sourceDocumentId)) {
           const doc = await db
-            .select({ title: schema.documents.title })
+            .select({ title: schema.documents.title, userId: schema.documents.userId })
             .from(schema.documents)
             .where(eq(schema.documents.id, p.sourceDocumentId))
             .get();
-          titleById.set(p.sourceDocumentId, doc?.title ?? null);
+          const owned = doc && (!doc.userId || doc.userId === this.userId());
+          titleById.set(p.sourceDocumentId, owned ? doc.title : null);
         }
       }
 
       const rows: schema.NewFeedPost[] = posts.map((p) => {
         const sourceTitle = p.sourceDocumentId ? titleById.get(p.sourceDocumentId) ?? null : null;
-        // Drop a sourceDocumentId that doesn't resolve, to avoid a dangling FK.
+        // Drop a sourceDocumentId that doesn't resolve (or isn't the caller's), to avoid a dangling FK.
         const sourceDocumentId = sourceTitle != null ? p.sourceDocumentId ?? null : null;
         return {
           id: crypto.randomUUID(),
-          userId: null,
+          userId: this.userIdOrNull(),
           text: p.text,
           kind: p.kind ?? null,
           authorName: p.authorName,
@@ -764,7 +807,7 @@ export class ScribeMCP extends McpAgent<Env, State, {}> {
           feedQueuedAt: schema.documents.feedQueuedAt,
         })
         .from(schema.documents)
-        .where(isNotNull(schema.documents.feedQueuedAt))
+        .where(and(ownerFilter(this.userId()), isNotNull(schema.documents.feedQueuedAt)))
         .orderBy(asc(schema.documents.feedQueuedAt))
         .limit(limit ?? 25);
 

@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../types';
-import { isKindeJwt, verifyKindeAccessToken, userIdForIdentity } from '../lib/kinde';
+import { isKindeJwt, verifyKindeAccessToken, resolveAndUpsertKindeUser } from '../lib/kinde';
 
 // --- JWKS cache ---
 
@@ -238,24 +238,13 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
       const identity = await verifyKindeAccessToken(c.env, token);
       if (!identity) return c.json({ error: 'Unauthorized: Invalid Kinde token' }, 401);
 
-      const userId = await userIdForIdentity(identity);
+      const { userId, email } = await resolveAndUpsertKindeUser(c.env, identity);
       const db = drizzle(c.env.DB, { schema });
-      const existing = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
-      if (!existing) {
-        await db.insert(schema.users).values({
-          id: userId,
-          email: identity.email || `${userId}@kinde.local`,
-          createdAt: new Date(),
-          lastLoginAt: new Date(),
-          isVerified: true,
-        }).onConflictDoNothing();
-      } else if (!existing.lastLoginAt || Date.now() - existing.lastLoginAt.getTime() > 60_000) {
-        await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, userId));
-      }
+      const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
 
       c.set('userId', userId);
-      c.set('userEmail', identity.email || existing?.email || '');
-      c.set('userName', existing?.name || identity.email || userId);
+      c.set('userEmail', email);
+      c.set('userName', user?.name || email || userId);
       await next();
       return;
     }

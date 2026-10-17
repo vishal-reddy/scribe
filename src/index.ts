@@ -17,8 +17,9 @@ import claude from './routes/claude';
 import auth from './routes/auth';
 import { oauthRoute } from './routes/oauth';
 import { webAuthRoute } from './routes/web-auth';
-import { ScribeMCP } from './mcp/scribe-mcp';
+import { ScribeMCP, type ScribeMcpProps } from './mcp/scribe-mcp';
 import { authenticateAccessToken, authorizationServerMetadata, protectedResourceMetadata } from './lib/oauth';
+import { isKindeJwt, verifyKindeAccessToken, resolveAndUpsertKindeUser, userIdForIdentity } from './lib/kinde';
 import { readSession } from './lib/session';
 import { expireEphemeralDocuments } from './services/ephemeral';
 import { renderConnectPage } from './web/connectPage';
@@ -245,22 +246,7 @@ app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
 const mcpHandler = ScribeMCP.serve('/mcp', { binding: 'SCRIBE_MCP' });
 
-async function validateMcpAuth(request: Request, env: Env): Promise<Response | null> {
-  if (env.ENVIRONMENT && env.ENVIRONMENT !== 'production') {
-    return null;
-  }
-
-  const authHeader = request.headers.get('Authorization') ?? '';
-  const bearerToken = /^Bearer\s+(.+)$/i.exec(authHeader)?.[1];
-
-  if (bearerToken) {
-    if (env.MCP_AUTH_TOKEN && bearerToken === env.MCP_AUTH_TOKEN) {
-      return null;
-    }
-    const info = await authenticateAccessToken(env.DB, env.OAUTH_PEPPER, bearerToken);
-    if (info) return null;
-  }
-
+function mcpUnauthorized(request: Request): Response {
   const origin = new URL(request.url).origin;
   return new Response(
     JSON.stringify({
@@ -279,6 +265,45 @@ async function validateMcpAuth(request: Request, env: Env): Promise<Response | n
       },
     }
   );
+}
+
+/**
+ * Resolves a real {userId, email} for every /mcp request — this used to
+ * just check "is this bearer token valid at all" and return null/Response,
+ * never attaching an identity to ctx.props at all. ScribeMCP's tool
+ * handlers had no userId to scope queries by, so every caller saw every
+ * user's documents. See scribe-mcp.ts for the handler-side fix.
+ */
+async function resolveMcpIdentity(request: Request, env: Env): Promise<ScribeMcpProps | Response> {
+  if (env.ENVIRONMENT && env.ENVIRONMENT !== 'production') {
+    // Dev convenience — unscoped, matches the previous no-auth dev behavior.
+    return { userId: '', email: '' };
+  }
+
+  const authHeader = request.headers.get('Authorization') ?? '';
+  const bearerToken = /^Bearer\s+(.+)$/i.exec(authHeader)?.[1];
+  if (!bearerToken) return mcpUnauthorized(request);
+
+  if (env.MCP_AUTH_TOKEN && bearerToken === env.MCP_AUTH_TOKEN) {
+    // Fixed admin identity — same convention as the REST API's X-API-Key
+    // branch (middleware/auth.ts) for this static, personal-use credential.
+    const email = 'vishal@scribe.app';
+    const userId = await userIdForIdentity({ sub: '', email });
+    return { userId, email };
+  }
+
+  if (isKindeJwt(bearerToken, env.KINDE_DOMAIN)) {
+    const identity = await verifyKindeAccessToken(env, bearerToken);
+    if (!identity) return mcpUnauthorized(request);
+    return resolveAndUpsertKindeUser(env, identity);
+  }
+
+  // Legacy opaque MCP OAuth token (third-party clients that consented
+  // before the Kinde migration) — already scoped to a real users.id.
+  const info = await authenticateAccessToken(env.DB, env.OAUTH_PEPPER, bearerToken);
+  if (info) return { userId: info.user_id, email: '' };
+
+  return mcpUnauthorized(request);
 }
 
 export default {
@@ -301,8 +326,9 @@ export default {
     }
 
     if (url.pathname.startsWith('/mcp')) {
-      const authError = await validateMcpAuth(request, env);
-      if (authError) return authError;
+      const identity = await resolveMcpIdentity(request, env);
+      if (identity instanceof Response) return identity;
+      (ctx as unknown as { props: ScribeMcpProps }).props = identity;
       return mcpHandler.fetch(request, env, ctx);
     }
 

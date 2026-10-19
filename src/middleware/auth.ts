@@ -321,6 +321,17 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
     c.set('userEmail', payload.email);
     c.set('userName', (payload.name as string) || payload.email);
 
+    try {
+      await c.env.DB.prepare(
+        `INSERT INTO users (id, email, name, created_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET email = excluded.email`
+      ).bind(userId, payload.email.toLowerCase().trim(), (payload.name as string) || payload.email, Date.now()).run();
+    } catch (e) {
+      // Don't fail the request if user upsert fails (e.g. read-only replica)
+      console.warn('Could not upsert user row:', e);
+    }
+
     await next();
   } catch (error) {
     console.error('Auth error:', error);

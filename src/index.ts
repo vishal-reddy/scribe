@@ -13,6 +13,7 @@ import documents from './routes/documents';
 import feed from './routes/feed';
 import tags from './routes/tags';
 import settings from './routes/settings';
+import orgs from './routes/orgs';
 import claude from './routes/claude';
 import auth from './routes/auth';
 import { oauthRoute } from './routes/oauth';
@@ -179,7 +180,7 @@ app.use('*', async (c, next) => {
       return origins.includes(origin) ? origin : '';
     },
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'CF-Authorization', 'X-Request-ID', 'X-API-Key', 'X-User-Email'],
+    allowHeaders: ['Content-Type', 'Authorization', 'CF-Authorization', 'X-Request-ID', 'X-API-Key', 'X-User-Email', 'X-Org-Id'],
     exposeHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'Retry-After'],
     maxAge: 86400,
     credentials: true,
@@ -236,6 +237,7 @@ app.route('/api/documents', documents);
 app.route('/api/feed', feed);
 app.route('/api/tags', tags);
 app.route('/api/settings', settings);
+app.route('/api/orgs', orgs);
 app.use('/api/claude/*', claudeRateLimit);
 app.route('/api/claude', claude);
 app.route('/auth', webAuthRoute);

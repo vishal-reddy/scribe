@@ -21,7 +21,21 @@ function ownership(userId: string | undefined) {
 export async function getDocument(db: Db, id: string, userId?: string) {
   const doc = await db.select().from(schema.documents).where(eq(schema.documents.id, id)).get();
   if (!doc) return null;
-  if (userId && doc.userId && doc.userId !== userId) return null;
+  if (userId && doc.userId && doc.userId !== userId) {
+    if (doc.orgId) {
+      const member = await db.select({ role: schema.organizationMembers.role })
+        .from(schema.organizationMembers)
+        .where(and(eq(schema.organizationMembers.orgId, doc.orgId), eq(schema.organizationMembers.userId, userId)))
+        .get();
+      if (member) return doc;
+    }
+    const shared = await db.select({ role: schema.documentShares.role })
+      .from(schema.documentShares)
+      .where(and(eq(schema.documentShares.documentId, id), eq(schema.documentShares.userId, userId)))
+      .get();
+    if (shared) return doc;
+    return null;
+  }
   return doc;
 }
 

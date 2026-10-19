@@ -1,10 +1,18 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { eq, desc, like, or, sql, count, and } from 'drizzle-orm';
+import { z } from 'zod';
+import { eq, desc, like, or, sql, count, and, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { createDocumentSchema, updateDocumentSchema } from '../types';
 import type { Env } from '../types';
+import { resolveScope } from '../lib/orgs';
+import {
+  getDocumentPermission,
+  shareDocument,
+  removeDocumentShare,
+  listDocumentShares,
+} from '../lib/documentShares';
 import {
   reparseDocument, rebindLinksToTitle, moveDocument, getBacklinks, getOutgoingLinks,
   addManualLink, removeLink, addTag, removeTag, NotFoundError,
@@ -14,6 +22,18 @@ import {
 } from '../services/classification';
 
 const documents = new Hono<{ Bindings: Env }>();
+
+async function getAccessibleDirectShares(env: Env, userId: string, userEmail: string): Promise<Map<string, string>> {
+  const { results } = await env.DB.prepare(
+    `SELECT document_id, role FROM document_shares WHERE user_id = ? OR (email = ? AND email != '')`
+  ).bind(userId, userEmail).all<{ document_id: string; role: string }>();
+
+  const map = new Map<string, string>();
+  for (const s of results) {
+    map.set(s.document_id, s.role);
+  }
+  return map;
+}
 
 function parsePagination(c: { req: { query: (key: string) => string | undefined } }, maxLimit = 100, defaultLimit = 50) {
   const rawLimit = parseInt(c.req.query('limit') || String(defaultLimit), 10);
@@ -39,8 +59,15 @@ documents.get('/search', async (c) => {
   const { limit, offset } = parsePagination(c);
   const pattern = `%${query}%`;
 
+  const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+  const userEmail = c.get('userEmail')?.toLowerCase().trim() || '';
+  const shareMap = await getAccessibleDirectShares(c.env, userId, userEmail);
+  const sharedDocIds = Array.from(shareMap.keys());
+
   const ownershipFilter = or(
     eq(schema.documents.userId, userId),
+    eq(schema.documents.orgId, activeOrgId),
+    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined,
     sql`${schema.documents.userId} IS NULL`
   );
 
@@ -54,6 +81,8 @@ documents.get('/search', async (c) => {
         updatedAt: schema.documents.updatedAt,
         createdBy: schema.documents.createdBy,
         lastEditedBy: schema.documents.lastEditedBy,
+        userId: schema.documents.userId,
+        orgId: schema.documents.orgId,
         isEphemeral: schema.documents.isEphemeral,
         expiresAt: schema.documents.expiresAt,
         // Title matches rank higher (2) than content matches (1)
@@ -86,7 +115,17 @@ documents.get('/search', async (c) => {
         )
       );
 
-    return c.json({ documents: results, total, limit, offset, query });
+    const enriched = results.map((doc) => {
+      const isOwner = doc.userId === userId || !doc.userId;
+      const directRole = shareMap.get(doc.id);
+      return {
+        ...doc,
+        isSharedWithMe: !isOwner && doc.orgId !== activeOrgId,
+        accessLevel: isOwner ? 'owner' : (directRole || 'editor'),
+      };
+    });
+
+    return c.json({ documents: enriched, total, limit, offset, query });
   } catch (error) {
     console.error('Error searching documents:', error);
     return c.json({ error: 'Failed to search documents' }, 500);
@@ -94,7 +133,7 @@ documents.get('/search', async (c) => {
 });
 
 /**
- * List all documents for the authenticated user
+ * List all documents for the authenticated user / active org / direct shares
  * GET /api/documents
  */
 documents.get('/', async (c) => {
@@ -102,8 +141,15 @@ documents.get('/', async (c) => {
   const { limit, offset } = parsePagination(c);
   const userId = c.get('userId');
 
+  const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+  const userEmail = c.get('userEmail')?.toLowerCase().trim() || '';
+  const shareMap = await getAccessibleDirectShares(c.env, userId, userEmail);
+  const sharedDocIds = Array.from(shareMap.keys());
+
   const ownershipFilter = or(
     eq(schema.documents.userId, userId),
+    eq(schema.documents.orgId, activeOrgId),
+    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined,
     sql`${schema.documents.userId} IS NULL`
   );
 
@@ -117,6 +163,8 @@ documents.get('/', async (c) => {
         updatedAt: schema.documents.updatedAt,
         createdBy: schema.documents.createdBy,
         lastEditedBy: schema.documents.lastEditedBy,
+        userId: schema.documents.userId,
+        orgId: schema.documents.orgId,
         parentId: schema.documents.parentId,
         sortKey: schema.documents.sortKey,
         isEphemeral: schema.documents.isEphemeral,
@@ -133,7 +181,17 @@ documents.get('/', async (c) => {
       .from(schema.documents)
       .where(ownershipFilter);
 
-    return c.json({ documents: allDocs, total, limit, offset });
+    const enriched = allDocs.map((doc) => {
+      const isOwner = doc.userId === userId || !doc.userId;
+      const directRole = shareMap.get(doc.id);
+      return {
+        ...doc,
+        isSharedWithMe: !isOwner && doc.orgId !== activeOrgId,
+        accessLevel: isOwner ? 'owner' : (directRole || 'editor'),
+      };
+    });
+
+    return c.json({ documents: enriched, total, limit, offset, activeOrgId });
   } catch (error) {
     console.error('Error fetching documents:', error);
     return c.json({ error: 'Failed to fetch documents' }, 500);
@@ -162,6 +220,13 @@ documents.get('/:id', async (c) => {
   const userId = c.get('userId');
 
   try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+
+    if (!perm.canRead) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
     const doc = await db
       .select()
       .from(schema.documents)
@@ -169,11 +234,6 @@ documents.get('/:id', async (c) => {
       .get();
 
     if (!doc) {
-      return c.json({ error: 'Document not found' }, 404);
-    }
-
-    // Ownership check (allow legacy docs without userId)
-    if (doc.userId && doc.userId !== userId) {
       return c.json({ error: 'Document not found' }, 404);
     }
 
@@ -188,7 +248,7 @@ documents.get('/:id', async (c) => {
     c.header('ETag', etag);
     c.header('Cache-Control', 'private, no-cache');
 
-    return c.json({ document: doc });
+    return c.json({ document: { ...doc, permission: perm } });
   } catch (error) {
     console.error('Error fetching document:', error);
     return c.json({ error: 'Failed to fetch document' }, 500);
@@ -205,6 +265,7 @@ documents.post('/', zValidator('json', createDocumentSchema), async (c) => {
   const userId = c.get('userId');
 
   try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
     const documentId = crypto.randomUUID();
     const now = new Date();
 
@@ -217,7 +278,8 @@ documents.post('/', zValidator('json', createDocumentSchema), async (c) => {
       updatedAt: now,
       createdBy: 'user',
       lastEditedBy: 'user',
-      userId: c.get('userId'),
+      userId: userId,
+      orgId: activeOrgId,
       feedQueuedAt: now, // queue for a learning-feed post (see list_notes_needing_feed)
     };
 
@@ -245,20 +307,14 @@ documents.patch('/:id', zValidator('json', updateDocumentSchema), async (c) => {
   const userId = c.get('userId');
 
   try {
-    // Check if document exists
-    const existing = await db
-      .select()
-      .from(schema.documents)
-      .where(eq(schema.documents.id, documentId))
-      .get();
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
 
-    if (!existing) {
+    if (!perm.canRead) {
       return c.json({ error: 'Document not found' }, 404);
     }
-
-    // Ownership check
-    if (existing.userId && existing.userId !== userId) {
-      return c.json({ error: 'Document not found' }, 404);
+    if (!perm.canWrite) {
+      return c.json({ error: 'Forbidden: read-only access' }, 403);
     }
 
     // Update document
@@ -312,26 +368,22 @@ documents.delete('/:id', async (c) => {
   const userId = c.get('userId');
 
   try {
-    // Check if document exists
-    const existing = await db
-      .select()
-      .from(schema.documents)
-      .where(eq(schema.documents.id, documentId))
-      .get();
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
 
-    if (!existing) {
+    if (!perm.canRead) {
       return c.json({ error: 'Document not found' }, 404);
     }
-
-    // Ownership check
-    if (existing.userId && existing.userId !== userId) {
-      return c.json({ error: 'Document not found' }, 404);
+    if (!perm.isOwner && perm.role !== 'admin') {
+      return c.json({ error: 'Forbidden: only owner or workspace admin can delete this document' }, 403);
     }
 
-    // Delete document (versions cascade automatically)
-    await db
-      .delete(schema.documents)
-      .where(eq(schema.documents.id, documentId));
+    // Delete document (cascade documentShares, noteLinks, noteTags, documentVersions, documents)
+    await db.delete(schema.documentShares).where(eq(schema.documentShares.documentId, documentId));
+    await db.delete(schema.noteLinks).where(or(eq(schema.noteLinks.sourceId, documentId), eq(schema.noteLinks.targetId, documentId)));
+    await db.delete(schema.noteTags).where(eq(schema.noteTags.documentId, documentId));
+    await db.delete(schema.documentVersions).where(eq(schema.documentVersions.documentId, documentId));
+    await db.delete(schema.documents).where(eq(schema.documents.id, documentId));
 
     return c.json({ success: true, message: 'Document deleted' });
   } catch (error) {
@@ -351,12 +403,9 @@ documents.get('/:id/versions', async (c) => {
   const { limit, offset } = parsePagination(c);
 
   try {
-    // Verify document ownership
-    const doc = await db.select().from(schema.documents).where(eq(schema.documents.id, documentId)).get();
-    if (!doc) {
-      return c.json({ error: 'Document not found' }, 404);
-    }
-    if (doc.userId && doc.userId !== userId) {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+    if (!perm.canRead) {
       return c.json({ error: 'Document not found' }, 404);
     }
 
@@ -390,6 +439,15 @@ documents.post('/:id/versions', async (c) => {
   const userId = c.get('userId');
 
   try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+    if (!perm.canRead) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+    if (!perm.canWrite) {
+      return c.json({ error: 'Forbidden: read-only access' }, 403);
+    }
+
     // Get current document
     const doc = await db
       .select()
@@ -398,11 +456,6 @@ documents.post('/:id/versions', async (c) => {
       .get();
 
     if (!doc) {
-      return c.json({ error: 'Document not found' }, 404);
-    }
-
-    // Ownership check
-    if (doc.userId && doc.userId !== userId) {
       return c.json({ error: 'Document not found' }, 404);
     }
 
@@ -473,17 +526,14 @@ documents.post('/:id/persist', async (c) => {
   const userId = c.get('userId');
 
   try {
-    const existing = await db
-      .select()
-      .from(schema.documents)
-      .where(eq(schema.documents.id, documentId))
-      .get();
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
 
-    if (!existing) {
+    if (!perm.canRead) {
       return c.json({ error: 'Document not found' }, 404);
     }
-    if (existing.userId && existing.userId !== userId) {
-      return c.json({ error: 'Document not found' }, 404);
+    if (!perm.canWrite) {
+      return c.json({ error: 'Forbidden: read-only access' }, 403);
     }
 
     await db
@@ -519,11 +569,94 @@ documents.post('/:id/classify', async (c) => {
   if (!category) {
     return c.json({ error: 'category is required', categories: TAXONOMY_CATEGORIES }, 400);
   }
+  const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+  const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+  if (!perm.canRead) {
+    return c.json({ error: 'Document not found or unknown category', categories: TAXONOMY_CATEGORIES }, 400);
+  }
+  if (!perm.canWrite) {
+    return c.json({ error: 'Forbidden: read-only access' }, 403);
+  }
   const result = await fileDocumentInCategory(db, documentId, category, userId);
   if (!result) {
     return c.json({ error: 'Document not found or unknown category', categories: TAXONOMY_CATEGORIES }, 400);
   }
   return c.json({ filed: result });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Document Shares
+// ─────────────────────────────────────────────────────────────
+
+const shareBodySchema = z.object({
+  email: z.string().email(),
+  role: z.enum(['viewer', 'editor']).default('editor'),
+});
+
+/**
+ * List direct shares for a document
+ * GET /api/documents/:id/shares
+ */
+documents.get('/:id/shares', async (c) => {
+  const documentId = c.req.param('id');
+  const userId = c.get('userId');
+
+  try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+    if (!perm.canRead) {
+      return c.json({ error: 'Document not found' }, 404);
+    }
+
+    const shares = await listDocumentShares(c.env, documentId, userId);
+    return c.json({ shares, canManage: perm.isOwner || perm.role === 'admin' });
+  } catch (error) {
+    console.error('Error listing shares:', error);
+    return c.json({ error: 'Failed to list shares' }, 500);
+  }
+});
+
+/**
+ * Share a document with a user by email
+ * POST /api/documents/:id/shares
+ */
+documents.post('/:id/shares', zValidator('json', shareBodySchema), async (c) => {
+  const documentId = c.req.param('id');
+  const userId = c.get('userId');
+  const { email, role } = c.req.valid('json');
+
+  try {
+    const result = await shareDocument(c.env, documentId, email, role, userId);
+    return c.json(result, 201);
+  } catch (error: any) {
+    console.error('Error sharing document:', error);
+    const msg = error?.message || 'Failed to share document';
+    if (msg.includes('Forbidden')) {
+      return c.json({ error: msg }, 403);
+    }
+    return c.json({ error: msg }, 400);
+  }
+});
+
+/**
+ * Remove a document share
+ * DELETE /api/documents/:id/shares/:shareId
+ */
+documents.delete('/:id/shares/:shareId', async (c) => {
+  const shareId = c.req.param('shareId');
+  const userId = c.get('userId');
+
+  try {
+    const result = await removeDocumentShare(c.env, shareId, userId);
+    return c.json(result);
+  } catch (error: any) {
+    console.error('Error removing share:', error);
+    const msg = error?.message || 'Failed to remove share';
+    if (msg.includes('Forbidden')) {
+      return c.json({ error: msg }, 403);
+    }
+    return c.json({ error: msg }, 400);
+  }
 });
 
 /** Backlinks — notes that link TO this one. GET /api/documents/:id/backlinks */

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 // Users table - stores authenticated users
 export const users = sqliteTable('users', {
@@ -14,6 +14,7 @@ export const users = sqliteTable('users', {
   otpCode: text('otp_code'), // hashed OTP for email verification
   otpExpiresAt: integer('otp_expires_at', { mode: 'timestamp' }),
   isVerified: integer('is_verified', { mode: 'boolean' }).default(false),
+  activeOrgId: text('active_org_id'),
 }, (table) => [
   index('idx_users_email').on(table.email),
   index('idx_users_session_token').on(table.sessionToken),
@@ -31,6 +32,7 @@ export const documents = sqliteTable('documents', {
   createdBy: text('created_by').notNull(), // 'user' or 'claude'
   lastEditedBy: text('last_edited_by').notNull(), // 'user' or 'claude'
   userId: text('user_id'), // FK to users.id — null for legacy docs
+  orgId: text('org_id'), // FK to organizations.id
   parentId: text('parent_id').references((): AnySQLiteColumn => documents.id, { onDelete: 'set null' }), // folder hierarchy
   sortKey: text('sort_key'), // manual ordering among siblings
   // Set when the note is created/edited; cleared once Claude generates a feed
@@ -45,6 +47,7 @@ export const documents = sqliteTable('documents', {
   index('idx_documents_updated_at').on(table.updatedAt),
   index('idx_documents_created_by').on(table.createdBy),
   index('idx_documents_user_id').on(table.userId),
+  index('idx_documents_org_id').on(table.orgId),
   index('idx_documents_parent_id').on(table.parentId),
   index('idx_documents_feed_queued_at').on(table.feedQueuedAt),
   index('idx_documents_expires_at').on(table.expiresAt),
@@ -134,6 +137,60 @@ export const feedPosts = sqliteTable('feed_posts', {
   index('idx_feed_posts_saved_at').on(table.savedAt),
 ]);
 
+// Organizations (shared workspaces)
+export const organizations = sqliteTable('organizations', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  isPersonal: integer('is_personal', { mode: 'boolean' }).notNull().default(false),
+  ownerUserId: text('owner_user_id').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+// Organization members
+export const organizationMembers = sqliteTable('organization_members', {
+  orgId: text('org_id').notNull(),
+  userId: text('user_id').notNull(),
+  role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member'
+  joinedAt: integer('joined_at', { mode: 'timestamp' }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.userId] }),
+  index('idx_org_members_user').on(table.userId),
+]);
+
+// Organization email invites
+export const orgInvites = sqliteTable('org_invites', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull(),
+  email: text('email').notNull(),
+  role: text('role').notNull().default('member'),
+  tokenHash: text('token_hash').notNull().unique(),
+  invitedByUserId: text('invited_by_user_id').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  acceptedAt: integer('accepted_at', { mode: 'timestamp' }),
+  revokedAt: integer('revoked_at', { mode: 'timestamp' }),
+  resentAt: integer('resent_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (table) => [
+  index('idx_org_invites_org_id').on(table.orgId),
+  index('idx_org_invites_email').on(table.email),
+]);
+
+// Document direct shares (per-resource ACL)
+export const documentShares = sqliteTable('document_shares', {
+  id: text('id').primaryKey(),
+  documentId: text('document_id').notNull().references(() => documents.id, { onDelete: 'cascade' }),
+  userId: text('user_id'),
+  email: text('email').notNull(),
+  role: text('role').notNull().default('viewer'), // 'viewer' | 'editor'
+  createdByUserId: text('created_by_user_id').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (table) => [
+  index('idx_document_shares_document_id').on(table.documentId),
+  index('idx_document_shares_user_id').on(table.userId),
+  index('idx_document_shares_email').on(table.email),
+]);
+
 // Export types for TypeScript
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -151,3 +208,12 @@ export type FeedPost = typeof feedPosts.$inferSelect;
 export type NewFeedPost = typeof feedPosts.$inferInsert;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type NewAppSetting = typeof appSettings.$inferInsert;
+export type Organization = typeof organizations.$inferSelect;
+export type NewOrganization = typeof organizations.$inferInsert;
+export type OrganizationMember = typeof organizationMembers.$inferSelect;
+export type NewOrganizationMember = typeof organizationMembers.$inferInsert;
+export type OrgInvite = typeof orgInvites.$inferSelect;
+export type NewOrgInvite = typeof orgInvites.$inferInsert;
+export type DocumentShare = typeof documentShares.$inferSelect;
+export type NewDocumentShare = typeof documentShares.$inferInsert;
+

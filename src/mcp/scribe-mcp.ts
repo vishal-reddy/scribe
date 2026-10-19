@@ -2,7 +2,7 @@ import { McpAgent } from "agents/mcp";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, like, or, and, desc, sql, isNotNull, asc } from "drizzle-orm";
+import { eq, like, or, and, desc, sql, isNotNull, asc, inArray } from "drizzle-orm";
 import * as schema from "../db/schema";
 import type { Env } from "../types";
 import { reparseDocument, rebindLinksToTitle } from "../services/notes";
@@ -14,6 +14,8 @@ import {
   listUnfiledDocuments,
   ownerFilter,
 } from "../services/classification";
+import { resolveScope, listOrganizationsForUser, switchActiveOrg, createOrganization } from "../lib/orgs";
+import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib/documentShares";
 
 type State = {};
 
@@ -61,10 +63,37 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
     return this.props?.userId ?? "";
   }
 
+  private email(): string {
+    return this.props?.email ?? "";
+  }
+
   /** For inserts: a real userId, or null to match the schema's NULL-means-unowned convention (never an empty string). */
   private userIdOrNull(): string | null {
     const id = this.userId();
     return id || null;
+  }
+
+  private async getScopeFilter() {
+    const userId = this.userId();
+    if (!userId) {
+      return { filter: ownerFilter(null), activeOrgId: null };
+    }
+    const activeOrgId = await resolveScope(this.env, userId);
+    const email = this.email();
+
+    const { results } = await this.env.DB.prepare(
+      `SELECT document_id FROM document_shares WHERE user_id = ? OR (email = ? AND email != '')`
+    ).bind(userId, email).all<{ document_id: string }>();
+    const sharedDocIds = results.map((r) => r.document_id);
+
+    const filter = or(
+      eq(schema.documents.userId, userId),
+      eq(schema.documents.orgId, activeOrgId),
+      sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined,
+      sql`${schema.documents.userId} IS NULL`
+    );
+
+    return { filter, activeOrgId };
   }
 
   async init() {
@@ -76,6 +105,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       { description: "List of all documents in Scribe" },
       async (uri) => {
         const db = this.getDb();
+        const { filter } = await this.getScopeFilter();
         const docs = await db
           .select({
             id: schema.documents.id,
@@ -85,7 +115,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
             lastEditedBy: schema.documents.lastEditedBy,
           })
           .from(schema.documents)
-          .where(ownerFilter(this.userId()))
+          .where(filter)
           .orderBy(desc(schema.documents.updatedAt));
 
         return {
@@ -106,13 +136,22 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       { description: "A single Scribe document" },
       async (uri, variables) => {
         const db = this.getDb();
+        const documentId = String(variables.id);
+        const userId = this.userId();
+        const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+        const perm = await getDocumentPermission(this.env, documentId, userId || null, activeOrgId);
+
+        if (!perm.canRead) {
+          return { contents: [] };
+        }
+
         const doc = await db
           .select()
           .from(schema.documents)
-          .where(eq(schema.documents.id, String(variables.id)))
+          .where(eq(schema.documents.id, documentId))
           .get();
 
-        if (!doc || (doc.userId && doc.userId !== this.userId())) {
+        if (!doc) {
           return { contents: [] };
         }
 
@@ -147,6 +186,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       },
     }, async () => {
       const db = this.getDb();
+      const { filter } = await this.getScopeFilter();
       const docs = await db
         .select({
           id: schema.documents.id,
@@ -156,7 +196,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
           lastEditedBy: schema.documents.lastEditedBy,
         })
         .from(schema.documents)
-        .where(ownerFilter(this.userId()))
+        .where(filter)
         .orderBy(desc(schema.documents.updatedAt));
 
       return {
@@ -181,13 +221,24 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       },
     }, async ({ documentId }) => {
       const db = this.getDb();
+      const userId = this.userId();
+      const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+      const perm = await getDocumentPermission(this.env, documentId, userId || null, activeOrgId);
+
+      if (!perm.canRead) {
+        return {
+          content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
+          isError: true,
+        };
+      }
+
       const doc = await db
         .select()
         .from(schema.documents)
         .where(eq(schema.documents.id, documentId))
         .get();
 
-      if (!doc || (doc.userId && doc.userId !== this.userId())) {
+      if (!doc) {
         return {
           content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
           isError: true,
@@ -223,6 +274,8 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       const db = this.getDb();
       const documentId = crypto.randomUUID();
       const now = new Date();
+      const userId = this.userId();
+      const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
 
       const newDoc: schema.NewDocument = {
         id: documentId,
@@ -235,6 +288,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         lastEditedBy: "claude",
         feedQueuedAt: now, // queue for a learning-feed post
         userId: this.userIdOrNull(),
+        orgId: activeOrgId,
       };
 
       await db.insert(schema.documents).values(newDoc);
@@ -288,6 +342,8 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       const now = new Date();
       const effectiveTtlDays = ttlDays ?? (await getEphemeralTtlDays(this.env));
       const expiresAt = expiresAtFromNow(effectiveTtlDays);
+      const userId = this.userId();
+      const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
 
       const newDoc: schema.NewDocument = {
         id: documentId,
@@ -302,6 +358,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         isEphemeral: true,
         expiresAt,
         userId: this.userIdOrNull(),
+        orgId: activeOrgId,
       };
 
       await db.insert(schema.documents).values(newDoc);
@@ -438,15 +495,19 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       },
     }, async ({ documentId, title, content }) => {
       const db = this.getDb();
-      const existing = await db
-        .select()
-        .from(schema.documents)
-        .where(eq(schema.documents.id, documentId))
-        .get();
+      const userId = this.userId();
+      const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+      const perm = await getDocumentPermission(this.env, documentId, userId || null, activeOrgId);
 
-      if (!existing || (existing.userId && existing.userId !== this.userId())) {
+      if (!perm.canRead) {
         return {
           content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
+          isError: true,
+        };
+      }
+      if (!perm.canWrite) {
+        return {
+          content: [{ type: "text" as const, text: `Error: Forbidden - document is read-only` }],
           isError: true,
         };
       }
@@ -490,6 +551,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
     }, async ({ query }) => {
       const db = this.getDb();
       const pattern = `%${query}%`;
+      const { filter } = await this.getScopeFilter();
       const docs = await db
         .select({
           id: schema.documents.id,
@@ -499,7 +561,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         .from(schema.documents)
         .where(
           and(
-            ownerFilter(this.userId()),
+            filter,
             or(
               like(schema.documents.title, pattern),
               like(schema.documents.markdown, pattern)
@@ -542,14 +604,11 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       },
     }, async ({ documentId }) => {
       const db = this.getDb();
+      const userId = this.userId();
+      const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+      const perm = await getDocumentPermission(this.env, documentId, userId || null, activeOrgId);
 
-      // document_versions has no userId of its own — scoped via the parent document's.
-      const parent = await db
-        .select({ userId: schema.documents.userId })
-        .from(schema.documents)
-        .where(eq(schema.documents.id, documentId))
-        .get();
-      if (!parent || (parent.userId && parent.userId !== this.userId())) {
+      if (!perm.canRead) {
         return {
           content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
           isError: true,
@@ -600,6 +659,22 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       },
     }, async ({ documentId }) => {
       const db = this.getDb();
+      const userId = this.userId();
+      const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+      const perm = await getDocumentPermission(this.env, documentId, userId || null, activeOrgId);
+
+      if (!perm.canRead) {
+        return {
+          content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
+          isError: true,
+        };
+      }
+      if (!perm.canWrite) {
+        return {
+          content: [{ type: "text" as const, text: `Error: Forbidden - document is read-only` }],
+          isError: true,
+        };
+      }
 
       const doc = await db
         .select()
@@ -607,7 +682,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         .where(eq(schema.documents.id, documentId))
         .get();
 
-      if (!doc || (doc.userId && doc.userId !== this.userId())) {
+      if (!doc) {
         return {
           content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
           isError: true,
@@ -828,6 +903,168 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
               `(set sourceDocumentId so they're linked and dequeued).`,
           },
         ],
+      };
+    });
+
+    // ── Workspaces & Sharing ─────────────────────────────────────────────
+
+    this.server.registerTool("list_organizations", {
+      title: "List Scribe organizations/workspaces",
+      description:
+        "List all organizations/workspaces the user belongs to in Scribe, along with their role and " +
+        "which workspace is currently active.",
+      inputSchema: {},
+      annotations: {
+        title: "List Scribe organizations",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    }, async () => {
+      const userId = this.userId();
+      if (!userId) {
+        return { content: [{ type: "text" as const, text: "No organizations available in unscoped mode." }] };
+      }
+      const activeOrgId = await resolveScope(this.env, userId);
+      const orgs = await listOrganizationsForUser(this.env, userId);
+      const enriched = orgs.map((o) => ({ ...o, isActive: o.id === activeOrgId }));
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(enriched, null, 2) }],
+      };
+    });
+
+    this.server.registerTool("create_organization", {
+      title: "Create a Scribe organization/workspace",
+      description:
+        "Create a new shared workspace in Scribe for collaborating with others. You become its owner.",
+      inputSchema: {
+        name: z.string().describe("The name of the new workspace (e.g. 'Engineering', 'Family')"),
+      },
+      annotations: {
+        title: "Create a Scribe organization",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    }, async ({ name }) => {
+      const userId = this.userId();
+      if (!userId) {
+        return {
+          content: [{ type: "text" as const, text: "Error: Must be authenticated to create a workspace." }],
+          isError: true,
+        };
+      }
+      const orgId = await createOrganization(this.env, userId, name);
+      return {
+        content: [
+          { type: "text" as const, text: `Workspace "${name}" created successfully with ID: ${orgId}` },
+        ],
+      };
+    });
+
+    this.server.registerTool("switch_organization", {
+      title: "Switch active Scribe organization/workspace",
+      description:
+        "Switch the user's active workspace in Scribe. Notes created afterward will belong to this workspace.",
+      inputSchema: {
+        orgId: z.string().describe("The ID of the organization to switch to"),
+      },
+      annotations: {
+        title: "Switch active Scribe organization",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    }, async ({ orgId }) => {
+      const userId = this.userId();
+      if (!userId) {
+        return {
+          content: [{ type: "text" as const, text: "Error: Must be authenticated to switch workspace." }],
+          isError: true,
+        };
+      }
+      try {
+        await switchActiveOrg(this.env, userId, orgId);
+        return {
+          content: [{ type: "text" as const, text: `Switched active workspace to: ${orgId}` }],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${err?.message || "Failed to switch workspace"}` }],
+          isError: true,
+        };
+      }
+    });
+
+    this.server.registerTool("share_document", {
+      title: "Share a Scribe document",
+      description:
+        "Share a Scribe document with another user by their email address with either 'viewer' (read-only) or 'editor' (read-write) role.",
+      inputSchema: {
+        documentId: z.string().describe("The ID of the document to share"),
+        email: z.string().email().describe("The email address of the person to share with"),
+        role: z.enum(["viewer", "editor"]).default("editor").describe("The permission level ('viewer' or 'editor')"),
+      },
+      annotations: {
+        title: "Share a Scribe document",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    }, async ({ documentId, email, role }) => {
+      const userId = this.userId();
+      if (!userId) {
+        return {
+          content: [{ type: "text" as const, text: "Error: Must be authenticated to share documents." }],
+          isError: true,
+        };
+      }
+      try {
+        const result = await shareDocument(this.env, documentId, email, role, userId);
+        return {
+          content: [
+            { type: "text" as const, text: `Document shared with ${email} as ${role} (Share ID: ${result.shareId})` },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `Error sharing document: ${err?.message || "Failed"}` }],
+          isError: true,
+        };
+      }
+    });
+
+    this.server.registerTool("list_document_shares", {
+      title: "List Scribe document shares",
+      description:
+        "List all users who have direct access to this document via document-level shares.",
+      inputSchema: {
+        documentId: z.string().describe("The ID of the document"),
+      },
+      annotations: {
+        title: "List Scribe document shares",
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    }, async ({ documentId }) => {
+      const userId = this.userId();
+      const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+      const perm = await getDocumentPermission(this.env, documentId, userId || null, activeOrgId);
+
+      if (!perm.canRead) {
+        return {
+          content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
+          isError: true,
+        };
+      }
+
+      const shares = await listDocumentShares(this.env, documentId, userId);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shares, null, 2) }],
       };
     });
   }

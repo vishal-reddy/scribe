@@ -22,8 +22,10 @@ import { ScribeMCP, type ScribeMcpProps } from './mcp/scribe-mcp';
 import { authenticateAccessToken, authorizationServerMetadata, protectedResourceMetadata } from './lib/oauth';
 import { isKindeJwt, verifyKindeAccessToken, resolveAndUpsertKindeUser, userIdForIdentity } from './lib/kinde';
 import { readSession } from './lib/session';
+import { lookupOrgInvite, acceptOrgInvite } from './lib/orgInvites';
 import { expireEphemeralDocuments } from './services/ephemeral';
 import { renderConnectPage } from './web/connectPage';
+import { renderPublicDoc, renderJoinPage } from './web/reader';
 import type { SessionData } from './lib/session';
 import type { Env } from './types';
 
@@ -208,6 +210,65 @@ app.get('/', async (c) => {
 
 // Public "Connect Claude" setup guide (no auth — it's how new users get started).
 app.get('/connect', (c) => c.html(renderConnectPage()));
+
+// Public workspace join invite landing page
+app.get('/join', async (c) => {
+  const token = c.req.query('token');
+  if (!token) return c.text('No invite token provided', 400);
+
+  const invite = await lookupOrgInvite(c.env, token);
+  if (!invite) return c.text('Invalid or expired invitation', 404);
+
+  const session = await readSession(c);
+  return c.html(renderJoinPage(invite, session, token));
+});
+
+app.post('/join', async (c) => {
+  const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, unknown>;
+  const token = (c.req.query('token') || body['token']) as string | undefined;
+  if (!token) return c.text('No invite token provided', 400);
+
+  const invite = await lookupOrgInvite(c.env, token);
+  if (!invite) return c.text('Invalid or expired invitation', 404);
+
+  const session = await readSession(c);
+  if (!session) {
+    const returnTo = encodeURIComponent(`/join?token=${token}`);
+    return c.redirect(`/auth/kinde/login?return_to=${returnTo}`);
+  }
+
+  try {
+    await acceptOrgInvite(c.env, invite.id, session.user_id);
+    return c.redirect('/');
+  } catch (e) {
+    return c.text(e instanceof Error ? e.message : 'Failed to accept invitation', 400);
+  }
+});
+
+// Public shareable document reader
+app.get('/d/:id', async (c) => {
+  const docId = c.req.param('id');
+  const doc = await c.env.DB.prepare(
+    `SELECT d.id, d.title, d.markdown, d.created_at, d.updated_at, d.created_by, o.name as org_name
+     FROM documents d
+     LEFT JOIN organizations o ON o.id = d.org_id
+     WHERE d.id = ?`
+  ).bind(docId).first<{
+    id: string;
+    title: string;
+    markdown: string;
+    created_at: number;
+    updated_at: number;
+    created_by: string;
+    org_name: string | null;
+  }>();
+
+  if (!doc) {
+    return c.text('Document not found', 404);
+  }
+
+  return c.html(renderPublicDoc(doc));
+});
 
 app.route('/', health);
 

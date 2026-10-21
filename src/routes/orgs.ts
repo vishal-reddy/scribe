@@ -149,6 +149,46 @@ orgs.get('/:id/invites', async (c) => {
   });
 });
 
+// GET /api/orgs/:id/join-link — get or create persistent workspace join link
+orgs.get('/:id/join-link', async (c) => {
+  const userId = c.get('userId');
+  const orgId = c.req.param('id');
+
+  try {
+    await requireRole(c.env, orgId, userId, ['owner', 'admin']);
+  } catch (e) {
+    return forbidden(c, e);
+  }
+
+  try {
+    const invites = await listPendingInvites(c.env, orgId);
+    let token = '';
+    const linkInvite = invites.find(
+      (i) => i.email === 'link@invite' || i.email.startsWith('link-invite')
+    );
+    if (linkInvite) {
+      const res = await resendOrgInvite(c.env, linkInvite.id);
+      token = res.token;
+    }
+    if (!token) {
+      const result = await createAndSendOrgInvite(
+        c.env,
+        orgId,
+        'link-invite@scribe.kecker.co',
+        'member',
+        userId
+      );
+      token = result.token;
+    }
+
+    const base = c.env.ENVIRONMENT === 'production' ? 'https://scribe.kecker.co' : 'http://localhost:8787';
+    const joinUrl = `${base}/join?token=${token}`;
+    return c.json({ ok: true, joinUrl, token });
+  } catch (e) {
+    return forbidden(c, e);
+  }
+});
+
 // POST /api/orgs/:id/invites/:inviteId/resend
 orgs.post('/:id/invites/:inviteId/resend', async (c) => {
   const userId = c.get('userId');
@@ -161,7 +201,7 @@ orgs.post('/:id/invites/:inviteId/resend', async (c) => {
     return forbidden(c, e);
   }
 
-  const sent = await resendOrgInvite(c.env, inviteId);
+  const { sent } = await resendOrgInvite(c.env, inviteId);
   return c.json({ sent });
 });
 

@@ -129,22 +129,26 @@ export async function createAndSendOrgInvite(
   return { inviteId, token: rawToken, sent };
 }
 
-export async function lookupOrgInvite(env: Env, rawToken: string): Promise<OrgInviteRow | null> {
+export async function lookupOrgInvite(env: Env, rawToken: string): Promise<(OrgInviteRow & { org_name: string }) | null> {
   const tokenHash = await hashRawToken(rawToken);
   const row = await env.DB.prepare(
-    "SELECT * FROM org_invites WHERE token_hash = ?"
-  ).bind(tokenHash).first<OrgInviteRow>();
+    `SELECT oi.*, o.name as org_name
+     FROM org_invites oi
+     JOIN organizations o ON o.id = oi.org_id
+     WHERE oi.token_hash = ?`
+  ).bind(tokenHash).first<OrgInviteRow & { org_name: string }>();
   if (!row) return null;
-  if (row.revoked_at || row.accepted_at) return null;
+  if (row.revoked_at) return null;
+  if (row.accepted_at && !row.email.startsWith("link-invite") && row.email !== "link@invite") return null;
   if (row.expires_at < Date.now()) return null;
   return row;
 }
 
 export async function acceptOrgInvite(env: Env, inviteId: string, userId: string): Promise<{ orgId: string }> {
-  const invite = await env.DB.prepare("SELECT org_id, role, accepted_at, revoked_at, expires_at FROM org_invites WHERE id = ?")
-    .bind(inviteId).first<{ org_id: string; role: string; accepted_at: number | null; revoked_at: number | null; expires_at: number }>();
+  const invite = await env.DB.prepare("SELECT org_id, email, role, accepted_at, revoked_at, expires_at FROM org_invites WHERE id = ?")
+    .bind(inviteId).first<{ org_id: string; email: string; role: string; accepted_at: number | null; revoked_at: number | null; expires_at: number }>();
   if (!invite) throw new Error("Invite not found");
-  if (invite.accepted_at) throw new Error("Invite already accepted");
+  if (invite.accepted_at && !invite.email.startsWith("link-invite") && invite.email !== "link@invite") throw new Error("Invite already accepted");
   if (invite.revoked_at) throw new Error("Invite has been revoked");
   if (invite.expires_at < Date.now()) throw new Error("Invite has expired");
 
@@ -153,7 +157,9 @@ export async function acceptOrgInvite(env: Env, inviteId: string, userId: string
     "INSERT OR IGNORE INTO organization_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)"
   ).bind(invite.org_id, userId, invite.role, now).run();
 
-  await env.DB.prepare("UPDATE org_invites SET accepted_at = ? WHERE id = ?").bind(now, inviteId).run();
+  if (!invite.email.startsWith("link-invite") && invite.email !== "link@invite") {
+    await env.DB.prepare("UPDATE org_invites SET accepted_at = ? WHERE id = ?").bind(now, inviteId).run();
+  }
   await env.DB.prepare("UPDATE users SET active_org_id = ? WHERE id = ?").bind(invite.org_id, userId).run();
 
   return { orgId: invite.org_id };
@@ -167,7 +173,7 @@ export async function listPendingInvites(env: Env, orgId: string): Promise<OrgIn
   return results;
 }
 
-export async function resendOrgInvite(env: Env, inviteId: string): Promise<boolean> {
+export async function resendOrgInvite(env: Env, inviteId: string): Promise<{ sent: boolean; token: string }> {
   const invite = await env.DB.prepare(
     `SELECT oi.*, o.name as org_name, u.email as invited_by_email
      FROM org_invites oi
@@ -175,7 +181,9 @@ export async function resendOrgInvite(env: Env, inviteId: string): Promise<boole
      JOIN users u ON u.id = oi.invited_by_user_id
      WHERE oi.id = ?`
   ).bind(inviteId).first<OrgInviteRow & { org_name: string; invited_by_email: string | null }>();
-  if (!invite || invite.revoked_at || invite.accepted_at) return false;
+  if (!invite || invite.revoked_at || (invite.accepted_at && !invite.email.startsWith("link-invite") && invite.email !== "link@invite")) {
+    return { sent: false, token: '' };
+  }
 
   const rawToken = generateRawToken();
   const tokenHash = await hashRawToken(rawToken);
@@ -185,12 +193,14 @@ export async function resendOrgInvite(env: Env, inviteId: string): Promise<boole
     "UPDATE org_invites SET token_hash = ?, expires_at = ?, resent_at = ? WHERE id = ?"
   ).bind(tokenHash, now + INVITE_TTL_MS, now, inviteId).run();
 
-  return sendOrgInviteEmail(env, {
+  const sent = await sendOrgInviteEmail(env, {
     to: invite.email,
     orgName: invite.org_name,
     invitedByEmail: invite.invited_by_email,
     inviteUrl: orgInviteLink(env, rawToken),
   });
+
+  return { sent, token: rawToken };
 }
 
 export async function revokeOrgInvite(env: Env, inviteId: string): Promise<void> {

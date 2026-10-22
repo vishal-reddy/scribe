@@ -87,7 +87,8 @@ orgs.get('/:id/members', async (c) => {
   if (!member) return forbidden(c, new Error('Not a member of that workspace'));
 
   const members = await listMembers(c.env, orgId);
-  return c.json({ members });
+  // isSelf lets clients show "Leave" on the caller's own row without knowing their own user id.
+  return c.json({ members: members.map((m) => ({ ...m, isSelf: m.userId === userId })) });
 });
 
 // DELETE /api/orgs/:id/members/:userId — remove member / leave workspace

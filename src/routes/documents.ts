@@ -20,6 +20,7 @@ import {
 import {
   THOMISTIC_TAXONOMY, TAXONOMY_CATEGORIES, fileDocumentInCategory,
 } from '../services/classification';
+import { checkScribeQuota, reportScribeQuota, triggerQuotaReport, HUB_QUOTA_URL } from '../lib/quota';
 
 const documents = new Hono<{ Bindings: Env }>();
 
@@ -210,6 +211,21 @@ documents.get('/categories', (c) =>
   }),
 );
 
+/** Collective storage quota status for current user across Kecker Office apps.
+ *  GET /api/documents/quota (registered before /:id) */
+documents.get('/quota', async (c) => {
+  const userId = c.get('userId');
+  const userEmail = c.get('userEmail');
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+  try {
+    const res = await fetch(`${HUB_QUOTA_URL}/${encodeURIComponent(userId)}?email=${encodeURIComponent(userEmail || '')}`);
+    const data = await res.json();
+    return c.json(data);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 /**
  * Get a specific document by ID
  * GET /api/documents/:id
@@ -263,9 +279,18 @@ documents.post('/', zValidator('json', createDocumentSchema), async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const data = c.req.valid('json');
   const userId = c.get('userId');
+  const userEmail = c.get('userEmail');
 
   try {
     const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+
+    // Pre-flight check against collective office quota
+    const estimatedBytes = (data.title?.length || 0) + (data.markdown?.length || 0);
+    const quotaCheck = await checkScribeQuota(c.env, userId, estimatedBytes, userEmail);
+    if (!quotaCheck.allowed) {
+      return c.json({ error: quotaCheck.message }, 403);
+    }
+
     const documentId = crypto.randomUUID();
     const now = new Date();
 
@@ -289,6 +314,9 @@ documents.post('/', zValidator('json', createDocumentSchema), async (c) => {
     await reparseDocument(db, documentId, newDoc.markdown ?? '', userId);
     await rebindLinksToTitle(db, documentId, newDoc.title);
 
+    // Report updated storage to collective quota hub asynchronously
+    triggerQuotaReport(c, c.env, userId, userEmail);
+
     return c.json({ document: newDoc }, 201);
   } catch (error) {
     console.error('Error creating document:', error);
@@ -305,6 +333,7 @@ documents.patch('/:id', zValidator('json', updateDocumentSchema), async (c) => {
   const documentId = c.req.param('id');
   const data = c.req.valid('json');
   const userId = c.get('userId');
+  const userEmail = c.get('userEmail');
 
   try {
     const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
@@ -351,6 +380,9 @@ documents.patch('/:id', zValidator('json', updateDocumentSchema), async (c) => {
       if (data.title) await rebindLinksToTitle(db, documentId, data.title);
     }
 
+    // Report updated storage to collective quota hub asynchronously
+    triggerQuotaReport(c, c.env, userId, userEmail);
+
     return c.json({ document: updated });
   } catch (error) {
     console.error('Error updating document:', error);
@@ -366,6 +398,7 @@ documents.delete('/:id', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const documentId = c.req.param('id');
   const userId = c.get('userId');
+  const userEmail = c.get('userEmail');
 
   try {
     const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
@@ -384,6 +417,9 @@ documents.delete('/:id', async (c) => {
     await db.delete(schema.noteTags).where(eq(schema.noteTags.documentId, documentId));
     await db.delete(schema.documentVersions).where(eq(schema.documentVersions.documentId, documentId));
     await db.delete(schema.documents).where(eq(schema.documents.id, documentId));
+
+    // Report updated storage to collective quota hub asynchronously
+    triggerQuotaReport(c, c.env, userId, userEmail);
 
     return c.json({ success: true, message: 'Document deleted' });
   } catch (error) {

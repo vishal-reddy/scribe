@@ -16,6 +16,7 @@ import {
 } from "../services/classification";
 import { resolveScope, listOrganizationsForUser, switchActiveOrg, createOrganization } from "../lib/orgs";
 import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib/documentShares";
+import { checkScribeQuota, reportScribeQuota } from "../lib/quota";
 
 type State = {};
 
@@ -275,7 +276,19 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       const documentId = crypto.randomUUID();
       const now = new Date();
       const userId = this.userId();
+      const userEmail = this.props?.email;
       const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+
+      if (userId) {
+        const estBytes = (title?.length || 0) + (content?.length || 0);
+        const check = await checkScribeQuota(this.env, userId, estBytes, userEmail);
+        if (!check.allowed) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: check.message || "Collective storage quota exceeded." }],
+          };
+        }
+      }
 
       const newDoc: schema.NewDocument = {
         id: documentId,
@@ -295,6 +308,10 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       // Derive #tags / [[wikilinks]] and heal links that pointed to this title.
       await reparseDocument(db, documentId, newDoc.markdown ?? "");
       await rebindLinksToTitle(db, documentId, title);
+
+      if (userId) {
+        reportScribeQuota(this.env, userId, userEmail).catch(() => {});
+      }
 
       return {
         content: [
@@ -343,7 +360,19 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       const effectiveTtlDays = ttlDays ?? (await getEphemeralTtlDays(this.env));
       const expiresAt = expiresAtFromNow(effectiveTtlDays);
       const userId = this.userId();
+      const userEmail = this.props?.email;
       const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+
+      if (userId) {
+        const estBytes = (title?.length || 0) + (content?.length || 0);
+        const check = await checkScribeQuota(this.env, userId, estBytes, userEmail);
+        if (!check.allowed) {
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: check.message || "Collective storage quota exceeded." }],
+          };
+        }
+      }
 
       const newDoc: schema.NewDocument = {
         id: documentId,
@@ -364,6 +393,10 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       await db.insert(schema.documents).values(newDoc);
       await reparseDocument(db, documentId, newDoc.markdown ?? "");
       await rebindLinksToTitle(db, documentId, title);
+
+      if (userId) {
+        reportScribeQuota(this.env, userId, userEmail).catch(() => {});
+      }
 
       return {
         content: [
@@ -525,6 +558,10 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         .update(schema.documents)
         .set(updates)
         .where(eq(schema.documents.id, documentId));
+
+      if (userId) {
+        reportScribeQuota(this.env, userId, this.props?.email).catch(() => {});
+      }
 
       return {
         content: [

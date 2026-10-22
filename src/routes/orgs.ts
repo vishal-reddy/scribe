@@ -201,6 +201,9 @@ orgs.post('/:id/invites/:inviteId/resend', async (c) => {
     return forbidden(c, e);
   }
 
+  const pending = await listPendingInvites(c.env, orgId);
+  if (!pending.some((i) => i.id === inviteId)) return c.json({ error: 'Invite not found' }, 404);
+
   const { sent } = await resendOrgInvite(c.env, inviteId);
   return c.json({ sent });
 });
@@ -216,6 +219,9 @@ orgs.delete('/:id/invites/:inviteId', async (c) => {
   } catch (e) {
     return forbidden(c, e);
   }
+
+  const pending = await listPendingInvites(c.env, orgId);
+  if (!pending.some((i) => i.id === inviteId)) return c.json({ error: 'Invite not found' }, 404);
 
   await revokeOrgInvite(c.env, inviteId);
   return c.json({ success: true, message: 'Invite revoked' });

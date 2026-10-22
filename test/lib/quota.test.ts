@@ -1,7 +1,30 @@
 import { describe, it, expect, vi } from 'vitest';
-import { calculateScribeStorageBytes, checkScribeQuota, reportScribeQuota } from '../../src/lib/quota';
+import { calculateScribeStorageBytes, checkScribeQuota, reportScribeQuota, isUnlimitedAccount } from '../../src/lib/quota';
 
 describe('Scribe Quota Integration', () => {
+  it('exempts vlukereddy@gmail.com and Kecker employees with unlimited quota', async () => {
+    expect(isUnlimitedAccount('vlukereddy@gmail.com')).toBe(true);
+    expect(isUnlimitedAccount('usr_123', 'vlukereddy@gmail.com')).toBe(true);
+    expect(isUnlimitedAccount('usr_123', 'dev@kecker.co')).toBe(true);
+    expect(isUnlimitedAccount('usr_123', 'eng@kecker.com')).toBe(true);
+    expect(isUnlimitedAccount('usr_123', 'freeuser@example.com')).toBe(false);
+
+    const fetchSpy = vi.fn();
+    const globalFetch = globalThis.fetch;
+    globalThis.fetch = fetchSpy;
+    try {
+      const res1 = await checkScribeQuota({} as any, 'vlukereddy@gmail.com', 500000000);
+      expect(res1.allowed).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      const res2 = await checkScribeQuota({} as any, 'usr_123', 500000000, 'staff@kecker.co');
+      expect(res2.allowed).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = globalFetch;
+    }
+  });
+
   it('calculates storage bytes across documents', async () => {
     const mockDb = {
       prepare: vi.fn().mockReturnValue({

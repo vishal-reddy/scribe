@@ -3,6 +3,37 @@ import type { Env } from '../types';
 
 export const HUB_QUOTA_URL = 'https://mcp.kecker.co/api/quota';
 
+/**
+ * Checks whether an account is exempt from storage caps and receives unlimited quota.
+ * Exempt accounts:
+ * 1. Specific admin/owner account: vlukereddy@gmail.com (and aliases)
+ * 2. Kecker employees: Any email ending with @kecker.co or @kecker.com (or subdomains)
+ */
+export function isUnlimitedAccount(userId?: string | null, email?: string | null): boolean {
+  const candidates = [email, userId]
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .map((v) => v.trim().toLowerCase());
+
+  for (const candidate of candidates) {
+    if (
+      candidate === 'vlukereddy@gmail.com' ||
+      (candidate.startsWith('vlukereddy+') && candidate.endsWith('@gmail.com')) ||
+      candidate === 'vishal.reddy@apexcapitalcorp.com'
+    ) {
+      return true;
+    }
+    if (
+      candidate.endsWith('@kecker.co') ||
+      candidate.endsWith('@kecker.com') ||
+      /@([a-z0-9-]+\.)?kecker\.(co|com)$/i.test(candidate)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function calculateScribeStorageBytes(
   db: D1Database,
   userId: string
@@ -69,6 +100,9 @@ export async function checkScribeQuota(
   userEmail?: string
 ): Promise<{ allowed: boolean; message?: string }> {
   if (!userId) return { allowed: true };
+  if (isUnlimitedAccount(userId, userEmail)) {
+    return { allowed: true };
+  }
   try {
     const hubUrl = `${HUB_QUOTA_URL}/${encodeURIComponent(userId)}/check`;
     const res = await fetch(hubUrl, {

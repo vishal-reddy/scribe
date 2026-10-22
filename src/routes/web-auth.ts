@@ -23,7 +23,16 @@ webAuthRoute.use('*', async (c, next) => {
   }
 });
 
-const sanitizeReturn = (r: string) => (r.startsWith('/') && !r.startsWith('//') ? r : '/');
+const sanitizeReturn = (r: string) => {
+  if (!r || !r.startsWith('/') || r.startsWith('//') || r.startsWith('/\\') || r.includes('\\')) return '/';
+  try {
+    const parsed = new URL(r, 'https://scribe.kecker.co');
+    if (parsed.origin !== 'https://scribe.kecker.co') return '/';
+    return parsed.pathname + parsed.search + parsed.hash;
+  } catch {
+    return '/';
+  }
+};
 
 /**
  * Kinde-backed login for Scribe's web surface — replaces the password

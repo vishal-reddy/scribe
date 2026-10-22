@@ -178,7 +178,6 @@ app.use('*', async (c, next) => {
 
   return cors({
     origin: (origin) => {
-      if (origins.includes('*')) return origin || '*';
       return origins.includes(origin) ? origin : '';
     },
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

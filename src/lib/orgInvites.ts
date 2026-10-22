@@ -119,9 +119,14 @@ export async function createAndSendOrgInvite(
   const inviter = await env.DB.prepare("SELECT email FROM users WHERE id = ?")
     .bind(invitedByUserId).first<{ email: string | null }>();
 
+  const rawOrgName = org?.name ?? "a workspace";
+  const orgName = (rawOrgName.includes('@') || /.*@.*'s Workspace/i.test(rawOrgName))
+    ? "Shared Workspace"
+    : rawOrgName;
+
   const sent = await sendOrgInviteEmail(env, {
     to: email,
-    orgName: org?.name ?? "a workspace",
+    orgName,
     invitedByEmail: inviter?.email ?? null,
     inviteUrl: orgInviteLink(env, rawToken),
   });

@@ -130,6 +130,24 @@ function formatInline(text: string): string {
   return s;
 }
 
+export function sanitizeOrgDisplayName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'personal' || trimmed.includes('@') || /.*'s Workspace/i.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+export function sanitizeInviteOrgName(name: string | null | undefined): string {
+  if (!name) return 'Shared Workspace';
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'personal' || trimmed.includes('@') || /.*@.*'s Workspace/i.test(trimmed)) {
+    return 'Shared Workspace';
+  }
+  return trimmed;
+}
+
 export function renderPublicDoc(doc: {
   id: string;
   title: string;
@@ -329,7 +347,7 @@ export function renderPublicDoc(doc: {
   </header>
   <main>
     <div class="meta">
-      ${doc.org_name ? `<span class="meta-tag">${escapeHtml(doc.org_name)}</span>` : ''}
+      ${sanitizeOrgDisplayName(doc.org_name) ? `<span class="meta-tag">${escapeHtml(sanitizeOrgDisplayName(doc.org_name)!)}</span>` : ''}
       <span>Updated ${updatedDate}</span>
       <span>•</span>
       <span>${words} words</span>
@@ -348,6 +366,7 @@ export function renderJoinPage(
   session: SessionData | null,
   token: string
 ): string {
+  const orgName = sanitizeInviteOrgName(invite.org_name);
   const returnTo = encodeURIComponent(`/join?token=${token}`);
 
   return `<!doctype html>
@@ -355,7 +374,7 @@ export function renderJoinPage(
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Join ${escapeHtml(invite.org_name)} — Scribe</title>
+  <title>Join ${escapeHtml(orgName)} — Scribe</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com">
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,500;1,400&family=Inter:wght@400;500;600&family=Nunito:wght@700&display=swap" rel="stylesheet">
@@ -461,10 +480,10 @@ export function renderJoinPage(
   <div class="card">
     <div class="brand">SCRIBE</div>
     <h1>Join Workspace</h1>
-    <p>You've been invited to collaborate in <strong>${escapeHtml(invite.org_name)}</strong> on Scribe.</p>
+    <p>You've been invited to collaborate in <strong>${escapeHtml(orgName)}</strong> on Scribe.</p>
     <div class="org-box">
       <div class="label">Workspace</div>
-      <div class="value">${escapeHtml(invite.org_name)}</div>
+      <div class="value">${escapeHtml(orgName)}</div>
       <div class="role">Role: ${escapeHtml(invite.role)}</div>
     </div>
     ${session ? `

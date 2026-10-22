@@ -27,7 +27,7 @@ export async function ensurePersonalOrg(env: Env, userId: string): Promise<strin
 }
 
 /**
- * Promoting a personal workspace restores the owner-identifying name when shared.
+ * Promoting a personal workspace marks it as shared without leaking owner identity.
  */
 export async function promoteSharedOrg(env: Env, orgId: string): Promise<void> {
   const org = await env.DB.prepare(
@@ -35,9 +35,7 @@ export async function promoteSharedOrg(env: Env, orgId: string): Promise<void> {
   ).bind(orgId).first<{ isPersonal: number; ownerUserId: string }>();
   if (!org || org.isPersonal !== 1) return;
 
-  const owner = await env.DB.prepare("SELECT email FROM users WHERE id = ?")
-    .bind(org.ownerUserId).first<{ email: string | null }>();
-  const name = owner?.email ? `${owner.email}'s Workspace` : "Shared Workspace";
+  const name = "Shared Workspace";
 
   await env.DB.prepare(
     "UPDATE organizations SET is_personal = 0, name = ? WHERE id = ? AND is_personal = 1"

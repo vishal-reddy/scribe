@@ -68,6 +68,8 @@ guidance.get('/documents/:id', async (c) => {
     layer: await getGuidanceLayer(c.env, userId, id),
     author: await authorGuidanceFor(c.env, userId, id),
     isTemplate: await isTemplate(c.env, id),
+    // Strictly the owner: unowned legacy notes belong to nobody, so nobody can publish instructions for readers on them.
+    isOwner: (await c.env.DB.prepare('SELECT user_id AS userId FROM documents WHERE id = ?').bind(id).first<{ userId: string | null }>())?.userId === userId,
     maxLength: GUIDANCE_MAX_LENGTH,
   });
 });

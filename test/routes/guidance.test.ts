@@ -290,6 +290,8 @@ describe('Templates', () => {
     const id = await template();
     expect((await call(student, `/documents/${id}/template`, 'POST', { template: false })).status).toBe(403);
     expect(((await (await call(student, `/documents/${id}`)).json()) as any).isTemplate).toBe(true);
+    expect(((await (await call(student, `/documents/${id}`)).json()) as any).isOwner).toBe(false);
+    expect(((await (await call(teacher, `/documents/${id}`)).json()) as any).isOwner).toBe(true);
   });
 
   it('using a template asks the person to review the instructions first', async () => {

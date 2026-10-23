@@ -97,5 +97,5 @@ new_sqlite_classes = ["DocumentSync", "ScribeMCP"]
 binding = "DB"
 database_name = "scribe-db-dev"
 # Filled in by scripts/provision-dev.sh. Deploying with this placeholder fails loudly, which is intended.
-database_id = "REPLACE_WITH_DEV_D1_ID"
+database_id = "c1929c56-5767-4430-8696-25c94e5fc107"
 migrations_dir = "src/db/migrations"

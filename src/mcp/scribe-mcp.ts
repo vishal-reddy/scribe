@@ -18,7 +18,7 @@ import { resolveScope, listOrganizationsForUser, switchActiveOrg, createOrganiza
 import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib/documentShares";
 import { checkScribeQuota, reportScribeQuota } from "../lib/quota";
 
-import { cleanGuidanceText, effectiveGuidance, setAuthorGuidance, setGuidanceLayer, validateAuthorText } from "../lib/writingGuidance";
+import { cleanGuidanceText, effectiveGuidance, getGuidanceLayer, setAuthorGuidance, setGuidanceLayer, validateAuthorText } from "../lib/writingGuidance";
 import {
   EDIT_FOR_LEARNING_NOTE,
   PRESERVE_VOICE_NOTE,
@@ -95,6 +95,14 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
   }
 
   async init() {
+    // The writer's own layer for all their notes goes into the server instructions (the channel hosts trust), so it applies
+    // without the model having to ask for it. McpAgent connects `this.server` after init(), so building it here is safe.
+    const userLayer = this.userId() ? await getGuidanceLayer(this.env, this.userId()) : null;
+    this.server = new McpServer(
+      { name: "Scribe", version: "1.0.0" },
+      { instructions: scribeInstructions({ writingGuidance: writingGuidanceEnabled(this.env.WRITING_GUIDANCE), userLayer }) }
+    );
+
     // ── Resources ──────────────────────────────────────────────────────
 
     this.server.resource(

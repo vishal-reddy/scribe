@@ -1,11 +1,8 @@
 import type { Env } from '../types';
-import { WRITER_GUIDANCE, lintGuidance, writingGuidanceEnabled } from '../mcp/writingGuidance';
+import { WRITER_GUIDANCE, lintGuidance, resolveGuidance, writingGuidanceEnabled } from '../mcp/writingGuidance';
 
-export type GuidanceMode = 'append' | 'replace';
-export interface GuidanceLayer {
-  text: string;
-  mode: GuidanceMode;
-}
+import type { GuidanceLayer, GuidanceMode } from '../mcp/writingGuidance';
+export type { GuidanceLayer, GuidanceMode };
 
 export const GUIDANCE_MAX_LENGTH = 2000;
 
@@ -26,54 +23,9 @@ export function defaultGuidance(env: Pick<Env, 'WRITING_GUIDANCE'>): string | nu
   return writingGuidanceEnabled(env.WRITING_GUIDANCE) ? WRITER_GUIDANCE : null;
 }
 
-export interface AuthorGuidance {
-  text: string;
-  authorName: string;
-}
-
-export interface EffectiveGuidance {
-  text: string;
-  /** Which layers shaped the text, outermost last. A 'replace' layer discards the ones before it. */
-  layers: { scope: 'default' | 'user' | 'author' | 'document'; mode?: GuidanceMode }[];
-}
-
-/**
- * default  →  the writer's layer for all notes  →  the note author's instructions (only if the writer adopted them)
- * →  the writer's layer for this note.
- * The writer's own layers can append or replace. The author's layer can only append, and is labelled with who wrote it,
- * so it can add to the writer's setup but never override the writer or Scribe's defaults.
- */
-export function resolveGuidance(
-  base: string | null,
-  user: GuidanceLayer | null,
-  doc: GuidanceLayer | null,
-  author: AuthorGuidance | null = null
-): EffectiveGuidance {
-  let text = base ?? '';
-  let layers: EffectiveGuidance['layers'] = base ? [{ scope: 'default' }] : [];
-
-  const join = (heading: string, body: string) => (text ? `${text}\n\n${heading}\n${body}` : body);
-
-  const apply = (scope: 'user' | 'document', layer: GuidanceLayer | null, heading: string) => {
-    if (!layer?.text) return;
-    if (layer.mode === 'replace') {
-      text = layer.text;
-      layers = [{ scope, mode: 'replace' }];
-    } else {
-      text = join(heading, layer.text);
-      layers = [...layers, { scope, mode: 'append' }];
-    }
-  };
-
-  apply('user', user, "The writer's own additions for all their notes:");
-  if (author?.text) {
-    const who = author.authorName.trim() || "this note's author";
-    text = join(`Instructions from ${who}, shared with this note. The writer chose to follow them:`, author.text);
-    layers = [...layers, { scope: 'author', mode: 'append' }];
-  }
-  apply('document', doc, "The writer's additions for this note:");
-  return { text, layers };
-}
+export { resolveGuidance } from '../mcp/writingGuidance';
+import type { AuthorGuidance, EffectiveGuidance } from '../mcp/writingGuidance';
+export type { AuthorGuidance, EffectiveGuidance };
 
 export async function getGuidanceLayer(env: Env, userId: string, documentId = ''): Promise<GuidanceLayer | null> {
   const row = await env.DB.prepare('SELECT text, mode FROM writing_guidance WHERE user_id = ? AND document_id = ?')

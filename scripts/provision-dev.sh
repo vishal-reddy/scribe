@@ -11,7 +11,8 @@ DB=scribe-db-dev
 
 if grep -q 'REPLACE_WITH_DEV_D1_ID' wrangler.toml; then
   echo "Creating D1 database $DB ..."
-  ID=$(npx wrangler d1 create "$DB" --json | python3 -c 'import sys,json; print(json.load(sys.stdin)["uuid"])')
+  npx wrangler d1 create "$DB"
+  ID=$(npx wrangler d1 list --json | python3 -c 'import sys,json; t=sys.stdin.read(); d=json.loads(t[t.index("["):]); print([x["uuid"] for x in d if x["name"]=="'"$DB"'"][0])')
   python3 - "$ID" <<'PY'
 import sys
 p = "wrangler.toml"

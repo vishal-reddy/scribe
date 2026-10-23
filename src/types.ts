@@ -25,6 +25,8 @@ export interface Env {
   SENTRY_DSN?: string;
   ENVIRONMENT?: string;
   ALLOWED_ORIGINS?: string;
+  /** "off" removes the writing-coach section from the MCP server instructions (default on). */
+  WRITING_GUIDANCE?: string;
 }
 
 // Add context variables type
@@ -41,6 +43,11 @@ declare module 'hono' {
 export const createDocumentSchema = z.object({
   title: z.string().min(1).max(200),
   markdown: z.string().optional().default(''),
+  /** The writer's own instructions for working on this note (a per-note layer, see lib/writingGuidance.ts). */
+  guidance: z.string().max(2000).optional(),
+  guidanceMode: z.enum(['append', 'replace']).optional(),
+  /** Instructions to attach for everyone who reads the note; readers adopt them before they apply. */
+  sharedGuidance: z.string().max(2000).optional(),
 });
 
 export const updateDocumentSchema = z.object({

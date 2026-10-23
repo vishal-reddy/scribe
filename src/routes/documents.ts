@@ -1,3 +1,4 @@
+import { cleanGuidanceText, setAuthorGuidance, setGuidanceLayer, validateAuthorText } from '../lib/writingGuidance';
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
@@ -281,6 +282,12 @@ documents.post('/', zValidator('json', createDocumentSchema), async (c) => {
   const userId = c.get('userId');
   const userEmail = c.get('userEmail');
 
+  // Guidance supplied at creation is validated up front so a bad value never leaves a half-created note.
+  const personalGuidance = cleanGuidanceText(data.guidance ?? '');
+  if (personalGuidance === null) return c.json({ error: 'guidance is too long' }, 400);
+  const shared = data.sharedGuidance ? validateAuthorText(data.sharedGuidance) : { text: '' };
+  if ('error' in shared) return c.json({ error: shared.error }, 400);
+
   try {
     const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
 
@@ -309,6 +316,12 @@ documents.post('/', zValidator('json', createDocumentSchema), async (c) => {
     };
 
     await db.insert(schema.documents).values(newDoc);
+
+    // Guidance that travels with the note: the writer's own layer, and/or instructions for readers.
+    if (personalGuidance) await setGuidanceLayer(c.env, userId, documentId, personalGuidance, data.guidanceMode ?? 'append');
+    if (shared.text) {
+      await setAuthorGuidance(c.env, documentId, userId, (c.get('userName') || userEmail || '').split('@')[0], shared.text);
+    }
 
     // Derive tags/links from the markdown, and heal any links that pointed to this title.
     await reparseDocument(db, documentId, newDoc.markdown ?? '', userId);
@@ -416,6 +429,11 @@ documents.delete('/:id', async (c) => {
     await db.delete(schema.noteLinks).where(or(eq(schema.noteLinks.sourceId, documentId), eq(schema.noteLinks.targetId, documentId)));
     await db.delete(schema.noteTags).where(eq(schema.noteTags.documentId, documentId));
     await db.delete(schema.documentVersions).where(eq(schema.documentVersions.documentId, documentId));
+    await c.env.DB.batch([
+      c.env.DB.prepare('DELETE FROM writing_guidance WHERE document_id = ?').bind(documentId),
+      c.env.DB.prepare('DELETE FROM document_author_guidance WHERE document_id = ?').bind(documentId),
+      c.env.DB.prepare('DELETE FROM guidance_adoptions WHERE document_id = ?').bind(documentId),
+    ]);
     await db.delete(schema.documents).where(eq(schema.documents.id, documentId));
 
     // Report updated storage to collective quota hub asynchronously

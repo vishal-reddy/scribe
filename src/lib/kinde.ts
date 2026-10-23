@@ -1,5 +1,5 @@
 import * as jose from 'jose';
-import { hubUrl } from './urls';
+import { hubAudience } from './urls';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema';
@@ -45,7 +45,7 @@ export async function verifyKindeAccessToken(env: Env, token: string): Promise<K
   try {
     const { payload } = await jose.jwtVerify(token, getJwks(env.KINDE_DOMAIN), {
       issuer: env.KINDE_DOMAIN,
-      audience: [env.KINDE_AUDIENCE, hubUrl(env)],
+      audience: [env.KINDE_AUDIENCE, hubAudience(env)],
     });
     if (typeof payload.sub !== 'string') return null;
     const email = typeof payload.email === 'string' ? payload.email : '';

@@ -18,6 +18,15 @@ export function hubUrl(env: Pick<Env, 'HUB_URL'>): string {
   return env.HUB_URL?.trim().replace(/\/+$/, '') || PROD_HUB_URL;
 }
 
+/**
+ * The audience of the tokens the hub forwards. It is a Kinde API identifier, not a place to send requests, so it
+ * stays the prod value (https://mcp.kecker.co) in dev too: dev reuses the prod Kinde configuration rather than
+ * needing its own APIs and callbacks. HUB_AUDIENCE overrides it if that ever changes.
+ */
+export function hubAudience(env: Pick<Env, 'HUB_AUDIENCE'>): string {
+  return env.HUB_AUDIENCE?.trim().replace(/\/+$/, '') || PROD_HUB_URL;
+}
+
 export function hubQuotaUrl(env: Pick<Env, 'HUB_URL'>): string {
   return `${hubUrl(env)}/api/quota`;
 }

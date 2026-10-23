@@ -76,10 +76,10 @@ APP_BASE_URL = "https://scribe-dev.kecker.co"
 HUB_URL = "https://mcp-dev.kecker.co"
 EMAIL_FROM = "Scribe Dev <no-reply@kecker.co>"
 KINDE_DOMAIN = "https://kecker.kinde.com"
-# Same "Scribe Web" Kinde application as prod; its allowed callback URLs must also list https://scribe-dev.kecker.co/...
+# Same "Scribe Web" Kinde application as prod. The web login redirects to the host that started it.
 KINDE_CLIENT_ID = "4e98217c88d24e728fc3b0c15e73e770"
-# A separate Kinde API for the dev host (audience == the dev origin).
-KINDE_AUDIENCE = "https://scribe-dev.kecker.co"
+# Dev reuses the prod Kinde configuration (same API audience), so no extra Kinde setup is needed.
+KINDE_AUDIENCE = "https://scribe.kecker.co"
 
 [[env.dev.durable_objects.bindings]]
 name = "DOCUMENT_SYNC"

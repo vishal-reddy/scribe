@@ -29,6 +29,8 @@ export interface Env {
   APP_BASE_URL?: string;
   /** The Kecker MCP hub origin for quota reporting and token audience. Unset means prod (https://mcp.kecker.co). */
   HUB_URL?: string;
+  /** Audience of hub-forwarded tokens. Unset means https://mcp.kecker.co in every environment (dev reuses prod Kinde). */
+  HUB_AUDIENCE?: string;
 }
 
 // Add context variables type

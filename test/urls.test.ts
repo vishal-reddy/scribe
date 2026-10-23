@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appBaseUrl, hubUrl, hubQuotaUrl } from '../src/lib/urls';
+import { appBaseUrl, hubUrl, hubQuotaUrl, hubAudience } from '../src/lib/urls';
 
 describe('deployment URLs', () => {
   it('defaults to prod in production and localhost elsewhere', () => {
@@ -19,5 +19,11 @@ describe('deployment URLs', () => {
   it('blank overrides fall back instead of producing broken URLs', () => {
     expect(appBaseUrl({ ENVIRONMENT: 'production', APP_BASE_URL: '  ' })).toBe('https://scribe.kecker.co');
     expect(hubUrl({ HUB_URL: '' })).toBe('https://mcp.kecker.co');
+  });
+
+  it('the hub audience stays the prod Kinde API even when dev talks to the dev hub', () => {
+    expect(hubAudience({})).toBe('https://mcp.kecker.co');
+    expect(hubAudience({ HUB_AUDIENCE: 'https://mcp-x.example/' })).toBe('https://mcp-x.example');
+    expect(hubUrl({ HUB_URL: 'https://mcp-dev.kecker.co' })).toBe('https://mcp-dev.kecker.co');
   });
 });

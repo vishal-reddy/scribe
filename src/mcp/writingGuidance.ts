@@ -12,6 +12,12 @@
  * and free of anything that tries to override the user or the host. `lintGuidance` (and its test) enforce that.
  */
 
+export type GuidanceMode = 'append' | 'replace';
+export interface GuidanceLayer {
+  text: string;
+  mode: GuidanceMode;
+}
+
 /** Keep the user's own wording and language. Appended to the tools that write the user's text. */
 export const PRESERVE_VOICE_NOTE =
   "Keep the user's own words, voice and language: save what they wrote as they wrote it, do not translate it " +
@@ -51,18 +57,29 @@ export const WRITER_GUIDANCE =
   "fits, suggest saying the idea aloud (or dictating it) and then tightening it on the page. The prompts " +
   "`coach_my_writing`, `say_it_aloud`, `think_it_through` and `use_my_language` are built for this.\n" +
   "- Light and optional. Mention a tip at most once per conversation unless asked, and drop it if the user " +
-  "isn't interested.\n" +
-  "The writer can adjust all of this, for every note or for one note, in the Scribe app or on the web. Before " +
-  "coaching or editing, call `get_writing_guidance` (pass the note's ID if you have one); it returns the " +
-  "writer's own current settings layered on these defaults. Follow it.";
+  "isn't interested.";
+
+/**
+ * Always included, even when the writer replaced the defaults: the writer can also adjust things for a single note,
+ * and an author can share instructions with a note's readers. Those are specific to a note, so they come from a tool.
+ */
+const PER_NOTE_POINTER =
+  "The writer can adjust all of this in the Scribe app or on the web, for every note (included above) or for a single " +
+  "note. When you work on a specific note, call `get_writing_guidance` with its ID first: it returns the writer's " +
+  "settings for that note, including instructions its author shared that the writer chose to follow. Follow it.";
 
 /** WRITING_GUIDANCE=off removes the coaching section; routing stays. */
 export function writingGuidanceEnabled(value: string | undefined): boolean {
   return (value ?? "").trim().toLowerCase() !== "off";
 }
 
-export function scribeInstructions(opts: { writingGuidance: boolean }): string {
-  return opts.writingGuidance ? `${ROUTING}\n\n${WRITER_GUIDANCE}` : ROUTING;
+/**
+ * The server instructions. The writer's own layer for all their notes is resolved into them here, so it reaches the
+ * model through the channel hosts treat as trusted, with no tool call needed for the setting that applies everywhere.
+ */
+export function scribeInstructions(opts: { writingGuidance: boolean; userLayer?: GuidanceLayer | null }): string {
+  const writer = resolveGuidance(opts.writingGuidance ? WRITER_GUIDANCE : null, opts.userLayer ?? null, null).text;
+  return [ROUTING, writer, PER_NOTE_POINTER].filter(Boolean).join('\n\n');
 }
 
 export interface WritingPrompt {
@@ -140,3 +157,55 @@ const FORBIDDEN: [RegExp, string][] = [
 export function lintGuidance(text: string): string[] {
   return FORBIDDEN.filter(([re]) => re.test(text)).map(([, why]) => why);
 }
+
+// ── Layering ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export interface AuthorGuidance {
+  text: string;
+  authorName: string;
+}
+
+export interface EffectiveGuidance {
+  text: string;
+  /** Which layers shaped the text, outermost last. A 'replace' layer discards the ones before it. */
+  layers: { scope: 'default' | 'user' | 'author' | 'document'; mode?: GuidanceMode }[];
+}
+
+/**
+ * default  →  the writer's layer for all notes  →  the note author's instructions (only if the writer adopted them)
+ * →  the writer's layer for this note.
+ * The writer's own layers can append or replace. The author's layer can only append, and is labelled with who wrote it,
+ * so it can add to the writer's setup but never override the writer or Scribe's defaults.
+ */
+export function resolveGuidance(
+  base: string | null,
+  user: GuidanceLayer | null,
+  doc: GuidanceLayer | null,
+  author: AuthorGuidance | null = null
+): EffectiveGuidance {
+  let text = base ?? '';
+  let layers: EffectiveGuidance['layers'] = base ? [{ scope: 'default' }] : [];
+
+  const join = (heading: string, body: string) => (text ? `${text}\n\n${heading}\n${body}` : body);
+
+  const apply = (scope: 'user' | 'document', layer: GuidanceLayer | null, heading: string) => {
+    if (!layer?.text) return;
+    if (layer.mode === 'replace') {
+      text = layer.text;
+      layers = [{ scope, mode: 'replace' }];
+    } else {
+      text = join(heading, layer.text);
+      layers = [...layers, { scope, mode: 'append' }];
+    }
+  };
+
+  apply('user', user, "The writer's own additions for all their notes:");
+  if (author?.text) {
+    const who = author.authorName.trim() || "this note's author";
+    text = join(`Instructions from ${who}, shared with this note. The writer chose to follow them:`, author.text);
+    layers = [...layers, { scope: 'author', mode: 'append' }];
+  }
+  apply('document', doc, "The writer's additions for this note:");
+  return { text, layers };
+}
+

@@ -63,6 +63,28 @@ describe('Scribe guidance copy', () => {
   });
 });
 
+describe('the writer\'s all-notes layer in the server instructions', () => {
+  it('reaches the model through the instructions, after the defaults, so no tool call is needed', () => {
+    const text = scribeInstructions({ writingGuidance: true, userLayer: { text: 'Reply in French.', mode: 'append' } });
+    expect(text.indexOf('How to help the writer')).toBeLessThan(text.indexOf('Reply in French.'));
+    expect(text).toContain("The writer's own additions for all their notes");
+  });
+
+  it('a replacing layer overrides the defaults but routing and the per-note pointer stay', () => {
+    const text = scribeInstructions({ writingGuidance: true, userLayer: { text: 'Only answer in Telugu.', mode: 'replace' } });
+    expect(text).toContain('Only answer in Telugu.');
+    expect(text).not.toContain('How to help the writer');
+    expect(text).toContain('list_documents');
+    expect(text).toContain('get_writing_guidance');
+  });
+
+  it('works when Scribe\'s own coaching is off but the writer set their own', () => {
+    const text = scribeInstructions({ writingGuidance: false, userLayer: { text: 'Be brief.', mode: 'append' } });
+    expect(text).toContain('Be brief.');
+    expect(text).not.toContain('How to help the writer');
+  });
+});
+
 describe('layering', () => {
   const base = 'DEFAULT';
 

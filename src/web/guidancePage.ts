@@ -22,10 +22,10 @@ export interface GuidancePageData {
 }
 
 function modeRadios(name: string, mode: 'append' | 'replace') {
-  return `<div class="modes">
+  return `<fieldset class="modes"><legend>How this combines with Scribe's defaults</legend>
     <label><input type="radio" name="${name}" value="append" ${mode === 'append' ? 'checked' : ''}> Add to Scribe's defaults</label>
     <label><input type="radio" name="${name}" value="replace" ${mode === 'replace' ? 'checked' : ''}> Replace the defaults</label>
-  </div>`;
+  </fieldset>`;
 }
 
 /** The writer's page for customizing how an assistant helps them write. Plain forms: it works without JavaScript. */
@@ -56,7 +56,7 @@ export function renderGuidancePage(d: GuidancePageData): string {
           <input type="hidden" name="action" value="save_author"><input type="hidden" name="doc" value="${esc(s.id)}">
           <h3>Instructions for readers of this note</h3>
           <p class="hint">For example a teacher's notes for an assignment. Readers see this text first and choose whether their assistant follows it. They can stop at any time, and they can't make it override their own settings. Leave empty to remove.</p>
-          <textarea name="text" maxlength="${GUIDANCE_MAX_LENGTH}" rows="5">${esc(s.author?.text ?? '')}</textarea>
+          <textarea name="text" aria-label="Instructions for readers of this note" maxlength="${GUIDANCE_MAX_LENGTH}" rows="5">${esc(s.author?.text ?? '')}</textarea>
           <button>Save instructions for readers</button>
         </form>
         <form method="post" action="/guidance">
@@ -86,31 +86,35 @@ export function renderGuidancePage(d: GuidancePageData): string {
   .hint{color:#5c5c66;font-size:14px;margin:.3em 0 .6em} .modes{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0;font-size:14px}
   pre{white-space:pre-wrap;background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:12px;font:13px/1.5 ui-monospace,monospace}
   .notice{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:8px 12px} .error{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 12px}
-  details{margin:.8em 0}
+  details{margin:.8em 0} fieldset.modes{border:0;padding:0;margin:8px 0} fieldset.modes legend{font-size:14px;color:#5c5c66;padding:0}
+  label[for=doc-pick]{display:block;font-weight:600;margin-bottom:4px}
+  a:focus-visible,button:focus-visible,textarea:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #2563eb;outline-offset:2px}
+  @media (prefers-color-scheme:dark){body{background:#121214;color:#f4f4f5} a{color:#d4d4d8} textarea,select,pre{background:#1c1c1f;color:#f4f4f5;border-color:#3f3f46} button{background:#e4e4e7;color:#18181b} .hint,fieldset.modes legend{color:#a1a1aa} .notice{background:#052e1f;border-color:#065f46} .error{background:#3b0d0d;border-color:#7f1d1d}}
 </style></head><body>
-<p><a href="/">← Scribe</a> · ${esc(d.email)}</p>
+<main>
+<nav aria-label="Account"><a href="/">← Scribe</a> · ${esc(d.email)}</nav>
 <h1>Writing guidance</h1>
 <p class="hint">Scribe helps you write in your own words and language, and to type and speak more clearly. This is how the assistant you connect to Scribe is told to help you. Change it for all your notes, or for one note.</p>
-${d.notice ? `<p class="notice">${esc(d.notice)}</p>` : ''}${d.error ? `<p class="error">${esc(d.error)}</p>` : ''}
+<div role="status" aria-live="polite">${d.notice ? `<p class="notice">${esc(d.notice)}</p>` : ''}${d.error ? `<p class="error" role="alert">${esc(d.error)}</p>` : ''}</div>
 
 <details><summary>Scribe's defaults</summary><pre>${esc(d.defaultText ?? 'Scribe\'s own coaching is turned off for this deployment.')}</pre></details>
 
 <h2>All my notes</h2>
 <form method="post" action="/guidance">
   <input type="hidden" name="action" value="save_user">
-  <textarea name="text" maxlength="${GUIDANCE_MAX_LENGTH}" rows="5" placeholder="For example: Always reply in Español. Ask me questions before you suggest wording.">${esc(d.userLayer?.text ?? '')}</textarea>
+  <textarea name="text" aria-label="Your guidance for all notes" maxlength="${GUIDANCE_MAX_LENGTH}" rows="5" placeholder="For example: Always reply in Español. Ask me questions before you suggest wording.">${esc(d.userLayer?.text ?? '')}</textarea>
   ${modeRadios('mode', d.userLayer?.mode ?? 'append')}
   <button>Save</button> <span class="hint">Leave empty to go back to the defaults.</span>
 </form>
 
 <h2>One note</h2>
-<form method="get" action="/guidance"><select name="doc" onchange="this.form.submit()"><option value="">Choose a note…</option>${docOptions}</select><noscript><button>Open</button></noscript></form>
+<form method="get" action="/guidance"><label for="doc-pick">Note</label><select id="doc-pick" name="doc"><option value="">Choose a note…</option>${docOptions}</select> <button>Open</button></form>
 ${
   s
     ? `<form method="post" action="/guidance">
         <input type="hidden" name="action" value="save_doc"><input type="hidden" name="doc" value="${esc(s.id)}">
         <h3>Your guidance for “${esc(s.title || 'Untitled')}”</h3>
-        <textarea name="text" maxlength="${GUIDANCE_MAX_LENGTH}" rows="4">${esc(s.layer?.text ?? '')}</textarea>
+        <textarea name="text" aria-label="Your guidance for this note" maxlength="${GUIDANCE_MAX_LENGTH}" rows="4">${esc(s.layer?.text ?? '')}</textarea>
         ${modeRadios('mode', s.layer?.mode ?? 'append')}
         <button>Save for this note</button>
       </form>${authorBlock}`
@@ -119,5 +123,6 @@ ${
 
 <h2>What the assistant will be told${s ? ' for this note' : ''}</h2>
 <pre>${esc(d.effective || "(Scribe's coaching is off and you have no guidance set.)")}</pre>
+</main>
 </body></html>`;
 }

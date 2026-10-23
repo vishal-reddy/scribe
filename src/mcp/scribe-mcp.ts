@@ -18,6 +18,15 @@ import { resolveScope, listOrganizationsForUser, switchActiveOrg, createOrganiza
 import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib/documentShares";
 import { checkScribeQuota, reportScribeQuota } from "../lib/quota";
 
+import { cleanGuidanceText, effectiveGuidance, setAuthorGuidance, setGuidanceLayer, validateAuthorText } from "../lib/writingGuidance";
+import {
+  EDIT_FOR_LEARNING_NOTE,
+  PRESERVE_VOICE_NOTE,
+  WRITING_PROMPTS,
+  scribeInstructions,
+  writingGuidanceEnabled,
+} from "./writingGuidance";
+
 type State = {};
 
 /** Resolved once per /mcp request in index.ts's resolveMcpIdentity, attached as ctx.props before the request reaches this class. Empty userId is the dev-only unscoped path. */
@@ -37,19 +46,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       // discovery: when several connected MCP servers all traffic in
       // "documents"/"notes", these instructions tell the model that the user's
       // personal notes/writing live in Scribe and which tool to reach for.
-      instructions:
-        "Scribe is the user's personal note-taking and writing app. It is the source of truth for " +
-        "the user's own notes, documents, and writing — in Scribe the words \"note\" and \"document\" " +
-        "mean the same thing. Use these tools whenever the user asks to see, list, browse, search, read, " +
-        "create, or edit THEIR notes/documents/writing (e.g. \"list my Scribe documents\", \"show my " +
-        "notes\", \"find my note about X\", \"add a note\"). Prefer Scribe over generic file/drive/email " +
-        "tools for anything the user calls their notes, their documents, or their writing.\n\n" +
-        "Typical flow: `list_documents` or `search_documents` to find a note, `read_document` to read one, " +
-        "`create_document`/`update_document` to write. New documents should then be classified with " +
-        "`list_categories` and filed with `file_document`; `list_unfiled_documents` finds ones still " +
-        "needing filing. The learning feed (`list_notes_needing_feed` + `create_feed_posts`) turns notes " +
-        "into spaced-repetition study prompts. For reminders/scratch notes meant to self-delete, use " +
-        "`create_ephemeral_note` instead of `create_document`.",
+      instructions: scribeInstructions({ writingGuidance: writingGuidanceEnabled(this.env?.WRITING_GUIDANCE) }),
     }
   );
 
@@ -168,6 +165,25 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       }
     );
 
+    // ── Prompts ────────────────────────────────────────────────────────
+    // User-invoked (slash commands in hosts that support them), so the user opts in to each one. They carry the
+    // same purpose as the server instructions: help the person write and speak better in their own words and language.
+    for (const p of WRITING_PROMPTS) {
+      this.server.registerPrompt(
+        p.name,
+        {
+          title: p.title,
+          description: p.description,
+          argsSchema: Object.fromEntries(
+            Object.entries(p.args).map(([k, d]) => [k, z.string().optional().describe(d)])
+          ),
+        },
+        (args: Record<string, string | undefined>) => ({
+          messages: [{ role: "user" as const, content: { type: "text" as const, text: p.build(args ?? {}) } }],
+        })
+      );
+    }
+
     // ── Tools ──────────────────────────────────────────────────────────
 
     this.server.registerTool("list_documents", {
@@ -258,11 +274,28 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       description:
         "Create a new document (note) in the user's Scribe. Use this when the user asks to add, " +
         "create, write, save, or jot down a note/document — e.g. \"add a note about X\", \"save this " +
-        "to Scribe\", \"start a new document\". After creating, classify the document into the " +
-        "Thomistic taxonomy and file it by calling file_document with the returned document ID.",
+        "to Scribe\", \"start a new document\". " + PRESERVE_VOICE_NOTE + " After creating, classify the " +
+        "document into the Thomistic taxonomy and file it by calling file_document with the returned document ID.",
       inputSchema: {
         title: z.string().describe("The title of the new document"),
         content: z.string().describe("The markdown content of the document"),
+        guidance: z
+          .string()
+          .max(2000)
+          .optional()
+          .describe(
+            "Only if the user said how they want to be helped with THIS note (for example \"ask me questions, " +
+              "don't write it for me\"): their instructions, in their own words. Saved with the note and returned " +
+              "by get_writing_guidance. Do not invent guidance the user didn't give."
+          ),
+        shareGuidance: z
+          .string()
+          .max(2000)
+          .optional()
+          .describe(
+            "Only if the user is an author (a teacher, say) and asked to attach instructions for everyone who reads " +
+              "this note. Readers see the text and choose whether their assistant follows it."
+          ),
       },
       annotations: {
         title: "Create a Scribe document",
@@ -271,9 +304,17 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         idempotentHint: false,
         openWorldHint: false,
       },
-    }, async ({ title, content }) => {
+    }, async ({ title, content, guidance, shareGuidance }) => {
       const db = this.getDb();
       const documentId = crypto.randomUUID();
+      const personalGuidance = cleanGuidanceText(guidance ?? "");
+      const sharedGuidance: { text: string } | { error: string } = shareGuidance ? validateAuthorText(shareGuidance) : { text: "" };
+      if (personalGuidance === null || "error" in sharedGuidance) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: personalGuidance === null ? "guidance is too long (2000 characters at most)." : ("error" in sharedGuidance ? sharedGuidance.error : "") }],
+        };
+      }
       const now = new Date();
       const userId = this.userId();
       const userEmail = this.props?.email;
@@ -305,6 +346,16 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       };
 
       await db.insert(schema.documents).values(newDoc);
+      // Guidance the user gave for this note travels with it.
+      let guidanceSaved = "";
+      if (userId && personalGuidance) {
+        await setGuidanceLayer(this.env, userId, documentId, personalGuidance, "append");
+        guidanceSaved = " The user's guidance for this note is saved; get_writing_guidance returns it.";
+      }
+      if (userId && "text" in sharedGuidance && sharedGuidance.text) {
+        await setAuthorGuidance(this.env, documentId, userId, (userEmail ?? "").split("@")[0], sharedGuidance.text);
+        guidanceSaved += " Shared instructions are attached; readers choose whether to follow them.";
+      }
       // Derive #tags / [[wikilinks]] and heal links that pointed to this title.
       await reparseDocument(db, documentId, newDoc.markdown ?? "");
       await rebindLinksToTitle(db, documentId, title);
@@ -318,9 +369,51 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
           {
             type: "text" as const,
             text:
-              `Document created successfully!\nID: ${documentId}\nTitle: ${title}\n\n` +
+              `Document created successfully!${guidanceSaved}\nID: ${documentId}\nTitle: ${title}\n\n` +
               `Now auto-organize it. ${TAXONOMY_GUIDANCE}\n\n` +
               `Then call file_document with documentId "${documentId}" and your chosen category.`,
+          },
+        ],
+      };
+    });
+
+    this.server.registerTool("get_writing_guidance", {
+      title: "Get the writer's guidance",
+      description:
+        "Returns how this writer wants to be helped with their writing: Scribe's defaults, layered with the " +
+        "writer's own settings and, for a note, any instructions its author shared that the writer chose to " +
+        "follow. Call it before coaching or editing, passing documentId when you are working on a specific " +
+        "note. It is the writer's own setting, so follow it.",
+      inputSchema: {
+        documentId: z.string().optional().describe("The note you are working on, if any"),
+      },
+      annotations: {
+        title: "Get the writer's guidance",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    }, async ({ documentId }) => {
+      const userId = this.userId();
+      if (documentId) {
+        const activeOrgId = userId ? await resolveScope(this.env, userId) : null;
+        const perm = await getDocumentPermission(this.env, documentId, userId || null, activeOrgId);
+        if (!perm.canRead) {
+          return {
+            content: [{ type: "text" as const, text: `Error: Document with ID ${documentId} not found` }],
+            isError: true,
+          };
+        }
+      }
+      const { text } = await effectiveGuidance(this.env, userId, documentId);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: text
+              ? `The writer's current guidance${documentId ? " for this note" : ""}:\n\n${text}`
+              : "The writer has turned Scribe's writing guidance off. Help with the task as asked.",
           },
         ],
       };
@@ -513,7 +606,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         "Update an existing Scribe document (note): change its title and/or replace its markdown " +
         "content. Use this when the user asks to edit, rewrite, append to, or change one of their " +
         "notes/documents. Content, when provided, REPLACES the existing body — read_document first if " +
-        "you need to preserve or extend the current text.",
+        "you need to preserve or extend the current text. " + PRESERVE_VOICE_NOTE + " " + EDIT_FOR_LEARNING_NOTE,
       inputSchema: {
         documentId: z.string().describe("The ID of the document to update"),
         title: z.string().optional().describe("New title (optional)"),

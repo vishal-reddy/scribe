@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:dev": "wrangler deploy --env dev",
+    "provision:dev": "./scripts/provision-dev.sh",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

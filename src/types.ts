@@ -25,6 +25,10 @@ export interface Env {
   SENTRY_DSN?: string;
   ENVIRONMENT?: string;
   ALLOWED_ORIGINS?: string;
+  /** This deployment's public origin, e.g. https://scribe-dev.kecker.co. Unset in prod (it derives from ENVIRONMENT). */
+  APP_BASE_URL?: string;
+  /** The Kecker MCP hub origin for quota reporting and token audience. Unset means prod (https://mcp.kecker.co). */
+  HUB_URL?: string;
 }
 
 // Add context variables type

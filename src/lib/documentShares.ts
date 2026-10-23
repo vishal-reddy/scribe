@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import { appBaseUrl } from './urls';
 import { isMember } from './orgs';
 
 export interface DocumentPermission {
@@ -144,7 +145,7 @@ export async function shareDocument(
       .bind(requestingUserId).first<{ email: string | null; name: string | null }>();
     const inviterName = inviter?.name || inviter?.email || "Someone";
     const docTitle = doc?.title || "a document";
-    const appUrl = env.ENVIRONMENT === 'production' ? 'https://scribe.kecker.co' : 'http://localhost:8787';
+    const appUrl = appBaseUrl(env);
 
     try {
       await fetch('https://api.resend.com/emails', {

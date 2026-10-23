@@ -24,6 +24,8 @@ export interface Env {
   KINDE_CLIENT_SECRET: string;
   SENTRY_DSN?: string;
   ENVIRONMENT?: string;
+  /** Dev only: secret for POST /api/auth/dev-session. Never set in prod. */
+  DEV_LOGIN_SECRET?: string;
   ALLOWED_ORIGINS?: string;
   /** This deployment's public origin, e.g. https://scribe-dev.kecker.co. Unset in prod (it derives from ENVIRONMENT). */
   APP_BASE_URL?: string;

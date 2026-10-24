@@ -54,3 +54,22 @@ describe('deployed environments fail closed', () => {
     expect((await mcp(unset)).status).toBe(401);
   });
 });
+
+describe('ownerless rows grant nothing', () => {
+  it('an ownerless document is invisible to every user and cannot be read or edited by id', async () => {
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO documents (id, user_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, NULL, 'orphan', '', 'secret body', ?, ?, 'legacy', 'legacy')`
+    ).bind(id, now, now).run();
+
+    const { getAuthHeaders } = await import('../helpers');
+    const headers = getAuthHeaders('anyone@example.com');
+    const list: any = await (await app.request('/api/documents', { headers }, env)).json();
+    expect(list.documents.some((d: any) => d.id === id)).toBe(false);
+    expect((await app.request(`/api/documents/${id}`, { headers }, env)).status).toBe(404);
+    expect((await app.request(`/api/documents/${id}`, { method: 'DELETE', headers }, env)).status).toBe(404);
+    expect((await app.request(`/api/sync/${id}/ws`, { headers }, env)).status).toBe(404);
+  });
+});

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import { app } from '../../src/index';
-import { applyMigrations, getAuthHeaders } from '../helpers';
+import { applyMigrations, getAuthHeaders, userIdFor } from '../helpers';
 
 describe('Document CRUD API', () => {
   const authHeaders = getAuthHeaders();
@@ -295,9 +295,9 @@ describe('Document CRUD API', () => {
       // Drizzle's sqlite {mode: 'timestamp'} stores whole seconds, not ms.
       const now = Math.floor(Date.now() / 1000);
       await env.DB.prepare(
-        `INSERT INTO documents (id, title, content, markdown, created_at, updated_at, created_by, last_edited_by, is_ephemeral, expires_at)
-         VALUES (?, ?, '', 'body', ?, ?, 'claude', 'claude', 1, ?)`
-      ).bind(id, 'Ephemeral doc', now, now, now + 60 * 60 * 24 * 30).run();
+        `INSERT INTO documents (id, user_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by, is_ephemeral, expires_at)
+         VALUES (?, ?, ?, '', 'body', ?, ?, 'claude', 'claude', 1, ?)`
+      ).bind(id, await userIdFor(), 'Ephemeral doc', now, now, now + 60 * 60 * 24 * 30).run();
       return id;
     }
 

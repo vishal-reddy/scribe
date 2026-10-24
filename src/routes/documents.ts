@@ -70,8 +70,7 @@ documents.get('/search', async (c) => {
   const ownershipFilter = or(
     eq(schema.documents.userId, userId),
     eq(schema.documents.orgId, activeOrgId),
-    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined,
-    sql`${schema.documents.userId} IS NULL`
+    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined
   );
 
   try {
@@ -119,7 +118,7 @@ documents.get('/search', async (c) => {
       );
 
     const enriched = results.map((doc) => {
-      const isOwner = doc.userId === userId || !doc.userId;
+      const isOwner = doc.userId === userId;
       const directRole = shareMap.get(doc.id);
       return {
         ...doc,
@@ -152,8 +151,7 @@ documents.get('/', async (c) => {
   const ownershipFilter = or(
     eq(schema.documents.userId, userId),
     eq(schema.documents.orgId, activeOrgId),
-    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined,
-    sql`${schema.documents.userId} IS NULL`
+    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined
   );
 
   try {
@@ -185,7 +183,7 @@ documents.get('/', async (c) => {
       .where(ownershipFilter);
 
     const enriched = allDocs.map((doc) => {
-      const isOwner = doc.userId === userId || !doc.userId;
+      const isOwner = doc.userId === userId;
       const directRole = shareMap.get(doc.id);
       return {
         ...doc,

@@ -18,7 +18,7 @@ describe('Feed API', () => {
   async function insertPost(overrides: Record<string, unknown> = {}): Promise<{ id: string }> {
     const post = {
       id: crypto.randomUUID(),
-      user_id: null as string | null,
+      user_id: (await userIdFor()) as string | null,
       text: 'What distinguishes a habit from a passion?',
       kind: 'recall',
       author_name: 'Aquinas Daily',
@@ -74,16 +74,16 @@ describe('Feed API', () => {
       expect(data.posts[0].text).toBe('saved');
     });
 
-    it('shows public (Claude-authored) and own posts, hides other users', async () => {
+    it('shows only your own posts: other users\' and ownerless posts stay hidden', async () => {
+      // Ownerless posts used to be visible to everyone, which leaked one user's study prompts to every account.
       const myId = await userIdFor();
-      await insertPost({ text: 'public', user_id: null });
+      await insertPost({ text: 'ownerless', user_id: null });
       await insertPost({ text: 'mine', user_id: myId });
       await insertPost({ text: 'theirs', user_id: 'another-user-id' });
 
       const res = await app.request('/api/feed', { headers: authHeaders }, env);
       const data: any = await res.json();
-      const texts = data.posts.map((p: any) => p.text).sort();
-      expect(texts).toEqual(['mine', 'public']);
+      expect(data.posts.map((p: any) => p.text)).toEqual(['mine']);
     });
 
     it('respects the limit parameter', async () => {

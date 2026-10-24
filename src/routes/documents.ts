@@ -1,5 +1,6 @@
 import { cleanGuidanceText, setAuthorGuidance, setGuidanceLayer, validateAuthorText } from '../lib/writingGuidance';
 import { Hono } from 'hono';
+import { hubQuotaUrl } from '../lib/urls';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq, desc, like, or, sql, count, and, inArray } from 'drizzle-orm';
@@ -21,7 +22,7 @@ import {
 import {
   THOMISTIC_TAXONOMY, TAXONOMY_CATEGORIES, fileDocumentInCategory,
 } from '../services/classification';
-import { checkScribeQuota, reportScribeQuota, triggerQuotaReport, HUB_QUOTA_URL } from '../lib/quota';
+import { checkScribeQuota, reportScribeQuota, triggerQuotaReport } from '../lib/quota';
 
 const documents = new Hono<{ Bindings: Env }>();
 
@@ -219,7 +220,7 @@ documents.get('/quota', async (c) => {
   const userEmail = c.get('userEmail');
   if (!userId) return c.json({ error: 'Unauthorized' }, 401);
   try {
-    const res = await fetch(`${HUB_QUOTA_URL}/${encodeURIComponent(userId)}?email=${encodeURIComponent(userEmail || '')}`);
+    const res = await fetch(`${hubQuotaUrl(c.env)}/${encodeURIComponent(userId)}?email=${encodeURIComponent(userEmail || '')}`);
     const data = await res.json();
     return c.json(data);
   } catch (err: any) {

@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import { appBaseUrl } from './urls';
 import { promoteSharedOrg } from './orgs';
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -30,8 +31,7 @@ export async function hashRawToken(raw: string): Promise<string> {
 }
 
 export function orgInviteLink(env: Env, rawToken: string): string {
-  const base = env.ENVIRONMENT === 'production' ? 'https://scribe.kecker.co' : 'http://localhost:8787';
-  return `${base}/auth/invite?token=${rawToken}`;
+  return `${appBaseUrl(env)}/auth/invite?token=${rawToken}`;
 }
 
 export async function createOrgInvite(

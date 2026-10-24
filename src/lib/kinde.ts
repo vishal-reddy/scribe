@@ -1,4 +1,5 @@
 import * as jose from 'jose';
+import { hubAudience } from './urls';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema';
@@ -39,13 +40,12 @@ export interface KindeIdentity {
 // behalf — see kecker-mcp-hub/src/routes/oauth.ts. Accepting either
 // audience lets that token verify here without the hub needing to hold (or
 // this app needing to mint) a separate per-app token.
-const HUB_AUDIENCE = 'https://mcp.kecker.co';
 
 export async function verifyKindeAccessToken(env: Env, token: string): Promise<KindeIdentity | null> {
   try {
     const { payload } = await jose.jwtVerify(token, getJwks(env.KINDE_DOMAIN), {
       issuer: env.KINDE_DOMAIN,
-      audience: [env.KINDE_AUDIENCE, HUB_AUDIENCE],
+      audience: [env.KINDE_AUDIENCE, hubAudience(env)],
     });
     if (typeof payload.sub !== 'string') return null;
     const email = typeof payload.email === 'string' ? payload.email : '';

@@ -1,7 +1,7 @@
 import type { D1Database } from '@cloudflare/workers-types';
+import { hubQuotaUrl } from './urls';
 import type { Env } from '../types';
 
-export const HUB_QUOTA_URL = 'https://mcp.kecker.co/api/quota';
 
 /**
  * Checks whether an account is exempt from storage caps and receives unlimited quota.
@@ -65,8 +65,8 @@ export async function reportScribeQuota(
   if (!userId) return;
   try {
     const { bytes, count } = await calculateScribeStorageBytes(env.DB, userId);
-    const hubUrl = `${HUB_QUOTA_URL}/${encodeURIComponent(userId)}/report`;
-    await fetch(hubUrl, {
+    const reportUrl = `${hubQuotaUrl(env)}/${encodeURIComponent(userId)}/report`;
+    await fetch(reportUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -104,8 +104,8 @@ export async function checkScribeQuota(
     return { allowed: true };
   }
   try {
-    const hubUrl = `${HUB_QUOTA_URL}/${encodeURIComponent(userId)}/check`;
-    const res = await fetch(hubUrl, {
+    const checkUrl = `${hubQuotaUrl(env)}/${encodeURIComponent(userId)}/check`;
+    const res = await fetch(checkUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

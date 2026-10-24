@@ -52,3 +52,50 @@ binding = "DB"
 database_name = "scribe-db"
 database_id = "4f10070e-b7be-4922-916d-a41765388d46"
 migrations_dir = "src/db/migrations"
+
+# ---------------------------------------------------------------------------------------------------------------
+# Dev environment: `wrangler deploy --env dev`  ->  scribe-dev at scribe-dev.kecker.co with its own D1 and Durable
+# Objects. Wrangler does not inherit bindings or vars into an environment, so everything is repeated.
+# Provision once with scripts/provision-dev.sh. See kecker-mcp-hub/docs/ENVIRONMENTS.md.
+# ---------------------------------------------------------------------------------------------------------------
+[env.dev]
+name = "scribe-dev"
+routes = [
+  { pattern = "scribe-dev.kecker.co", custom_domain = true }
+]
+
+[env.dev.observability]
+enabled = true
+
+[env.dev.triggers]
+crons = ["0 6 * * *"]
+
+[env.dev.vars]
+ENVIRONMENT = "development"
+APP_BASE_URL = "https://scribe-dev.kecker.co"
+HUB_URL = "https://mcp-dev.kecker.co"
+EMAIL_FROM = "Scribe Dev <no-reply@kecker.co>"
+KINDE_DOMAIN = "https://kecker.kinde.com"
+# Same "Scribe Web" Kinde application as prod. The web login redirects to the host that started it.
+KINDE_CLIENT_ID = "4e98217c88d24e728fc3b0c15e73e770"
+# Dev reuses the prod Kinde configuration (same API audience), so no extra Kinde setup is needed.
+KINDE_AUDIENCE = "https://scribe.kecker.co"
+
+[[env.dev.durable_objects.bindings]]
+name = "DOCUMENT_SYNC"
+class_name = "DocumentSync"
+
+[[env.dev.durable_objects.bindings]]
+name = "SCRIBE_MCP"
+class_name = "ScribeMCP"
+
+[[env.dev.migrations]]
+tag = "v1"
+new_sqlite_classes = ["DocumentSync", "ScribeMCP"]
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "scribe-db-dev"
+# Filled in by scripts/provision-dev.sh. Deploying with this placeholder fails loudly, which is intended.
+database_id = "c1929c56-5767-4430-8696-25c94e5fc107"
+migrations_dir = "src/db/migrations"

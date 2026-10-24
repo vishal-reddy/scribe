@@ -1,4 +1,5 @@
 import { Context } from 'hono';
+import { isLocalDev } from '../lib/env';
 import { HTTPException } from 'hono/http-exception';
 import { ZodError } from 'zod';
 import { reportError } from '../lib/error-reporter';
@@ -65,7 +66,7 @@ interface ErrorResponse {
  */
 export function errorHandler(err: Error, c: Context<{ Bindings: Env }>): Response {
   const requestId = c.get('requestId') || 'unknown';
-  const isDevelopment = c.env?.ENVIRONMENT !== 'production';
+  const isDevelopment = isLocalDev(c.env ?? {});
 
   // Handle Zod validation errors
   if (err instanceof ZodError) {

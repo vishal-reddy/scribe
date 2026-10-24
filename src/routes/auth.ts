@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../types';
+import { isLocalDev } from '../lib/env';
 import type { D1Database } from '@cloudflare/workers-types';
 
 const auth = new Hono<{ Bindings: Env }>();
@@ -32,7 +33,8 @@ async function d1RateLimit(
     }
     return { allowed: true, retryAfterSec: 0 };
   } catch {
-    return { allowed: true, retryAfterSec: 0 };
+    // Fail closed: if the limiter cannot count, an attacker must not get unlimited OTP guesses.
+    return { allowed: false, retryAfterSec: 30 };
   }
 }
 
@@ -140,7 +142,7 @@ auth.post('/request-otp', zValidator('json', requestOtpSchema), async (c) => {
       });
     }
 
-    if (c.env.ENVIRONMENT !== 'production') {
+    if (isLocalDev(c.env)) {
       console.log(`[DEV] OTP for ${email}: ${otp}`);
     }
 
@@ -172,20 +174,20 @@ auth.post('/request-otp', zValidator('json', requestOtpSchema), async (c) => {
         console.error('Resend send failed', res.status, detail);
         return c.json({ error: 'Failed to send verification code.' }, 502);
       }
-    } else if (c.env.ENVIRONMENT === 'production') {
-      console.error('RESEND_API_KEY missing in production — cannot deliver OTP');
+    } else if (!isLocalDev(c.env)) {
+      console.error('RESEND_API_KEY missing — cannot deliver OTP');
       return c.json({ error: 'Email delivery is not configured. Please try again later.' }, 500);
     }
 
-    // In development, also return OTP in response for testing ease
+    // Local development only: return the OTP in the response for testing ease
     const response: Record<string, unknown> = {
       success: true,
       message: 'Verification code sent to your email',
       expiresInSeconds: 300,
     };
 
-    if (c.env.ENVIRONMENT !== 'production') {
-      response.devOtp = otp; // ONLY in dev/test!
+    if (isLocalDev(c.env)) {
+      response.devOtp = otp; // ONLY local dev/test: never on a deployed Worker
     }
 
     return c.json(response);
@@ -202,8 +204,18 @@ auth.post('/request-otp', zValidator('json', requestOtpSchema), async (c) => {
 auth.post('/verify-otp', zValidator('json', verifyOtpSchema), async (c) => {
   const { email, otp } = c.req.valid('json');
 
-  // Per-email: 5 attempts per 15 minutes to prevent brute-force of 6-digit codes
-  const attemptLimit = await d1RateLimit(c.env.DB, `otp_verify:${email}`, 5, 15 * 60_000);
+  // Brute-force protection for 6-digit codes. Keyed by email AND client IP (5 per 15 minutes) so one attacker
+  // cannot lock a victim out by burning their attempts, plus a looser per-email ceiling (30) so a botnet cannot
+  // grind through the code space within its 5-minute lifetime.
+  const verifyIp = c.req.header('cf-connecting-ip') ?? 'unknown';
+  const [pairLimit, emailCeiling] = await Promise.all([
+    d1RateLimit(c.env.DB, `otp_verify:${email}:${verifyIp}`, 5, 15 * 60_000),
+    d1RateLimit(c.env.DB, `otp_verify:${email}`, 30, 15 * 60_000),
+  ]);
+  const attemptLimit = {
+    allowed: pairLimit.allowed && emailCeiling.allowed,
+    retryAfterSec: Math.max(pairLimit.retryAfterSec, emailCeiling.retryAfterSec),
+  };
   if (!attemptLimit.allowed) {
     return c.json(
       { error: 'Too many incorrect attempts. Please request a new code.' },

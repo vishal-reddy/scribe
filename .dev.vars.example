@@ -1,1 +1,4 @@
 ANTHROPIC_API_KEY=your-api-key-here
+# Local wrangler dev only: enables unsigned tokens, the OTP echoed in responses, and unscoped MCP.
+# NEVER set this in wrangler.toml or on a deployed Worker. See src/lib/env.ts.
+LOCAL_DEV=true

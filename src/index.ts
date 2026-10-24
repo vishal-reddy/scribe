@@ -24,7 +24,8 @@ import { isKindeJwt, verifyKindeAccessToken, resolveAndUpsertKindeUser, userIdFo
 import { readSession } from './lib/session';
 import { lookupOrgInvite, acceptOrgInvite } from './lib/orgInvites';
 import { expireEphemeralDocuments } from './services/ephemeral';
-import { renderConnectPage } from './web/connectPage';
+import { renderConnectPage, SCRIBE_CONNECT } from './web/connectPage';
+import { appBaseUrl } from './lib/urls';
 import { renderPublicDoc, renderJoinPage } from './web/reader';
 import type { SessionData } from './lib/session';
 import type { Env } from './types';
@@ -34,8 +35,7 @@ import type { Env } from './types';
 const _esc = (s: string) =>
   s.replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c] || c);
 
-function renderLandingPage(session: SessionData | null): string {
-  const origin = 'https://scribe.kecker.co';
+function renderLandingPage(session: SessionData | null, origin: string): string {
 
   const navRight = session
     ? `<a href="/connect" class="nav-link">Connect Claude</a><span class="nav-email">${_esc(session.email)}</span><a href="/auth/logout" class="nav-ghost">Sign out</a>`
@@ -172,8 +172,8 @@ app.use('*', async (c, next) => {
   const allowedRaw = c.env.ALLOWED_ORIGINS;
   const origins = allowedRaw
     ? allowedRaw.split(',').map((o) => o.trim())
-    : c.env.ENVIRONMENT === 'production'
-      ? ['https://scribe.kecker.co']
+    : c.env.APP_BASE_URL || c.env.ENVIRONMENT === 'production'
+      ? [appBaseUrl(c.env)]
       : ['http://localhost:8081', 'http://localhost:19006', 'http://localhost:8787'];
 
   return cors({
@@ -204,11 +204,11 @@ app.use('*', bodySizeLimit());
 
 app.get('/', async (c) => {
   const session = await readSession(c);
-  return c.html(renderLandingPage(session));
+  return c.html(renderLandingPage(session, appBaseUrl(c.env)));
 });
 
 // Public "Connect Claude" setup guide (no auth — it's how new users get started).
-app.get('/connect', (c) => c.html(renderConnectPage()));
+app.get('/connect', (c) => c.html(renderConnectPage({ ...SCRIBE_CONNECT, mcpUrl: `${appBaseUrl(c.env)}/mcp` })));
 
 // Public workspace join invite landing page
 app.get('/join', async (c) => {

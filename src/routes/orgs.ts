@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { appBaseUrl } from '../lib/urls';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
@@ -182,8 +183,7 @@ orgs.get('/:id/join-link', async (c) => {
       token = result.token;
     }
 
-    const base = c.env.ENVIRONMENT === 'production' ? 'https://scribe.kecker.co' : 'http://localhost:8787';
-    const joinUrl = `${base}/join?token=${token}`;
+    const joinUrl = `${appBaseUrl(c.env)}/join?token=${token}`;
     return c.json({ ok: true, joinUrl, token });
   } catch (e) {
     return forbidden(c, e);

@@ -87,8 +87,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
     const filter = or(
       eq(schema.documents.userId, userId),
       eq(schema.documents.orgId, activeOrgId),
-      sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined,
-      sql`${schema.documents.userId} IS NULL`
+      sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined
     );
 
     return { filter, activeOrgId };
@@ -944,7 +943,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
             .from(schema.documents)
             .where(eq(schema.documents.id, p.sourceDocumentId))
             .get();
-          const owned = doc && (!doc.userId || doc.userId === this.userId());
+          const owned = doc && doc.userId === this.userId();
           titleById.set(p.sourceDocumentId, owned ? doc.title : null);
         }
       }

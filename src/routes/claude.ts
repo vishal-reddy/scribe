@@ -51,10 +51,7 @@ claude.get('/artifacts', async (c) => {
   const { limit, offset } = parsePagination(c);
   const userId = c.get('userId');
 
-  const ownershipFilter = or(
-    eq(schema.documents.userId, userId),
-    sql`${schema.documents.userId} IS NULL`
-  );
+  const ownershipFilter = eq(schema.documents.userId, userId);
 
   try {
     const documents = await db

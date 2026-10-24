@@ -9,13 +9,11 @@ export function getDb(d1: D1Database): Db {
   return drizzle(d1, { schema });
 }
 
-// Lets unauthenticated callers (MCP per-resource auth, legacy docs) match too.
+// A note belongs to exactly one user. Ownerless (user_id NULL) rows used to be visible to everyone; they were all
+// assigned to their owner in 2026-10 and nothing may match them again. No user id means no match, never "all notes".
 function ownership(userId: string | undefined) {
-  if (!userId) return undefined;
-  return or(
-    eq(schema.documents.userId, userId),
-    sql`${schema.documents.userId} IS NULL`,
-  );
+  if (!userId) return sql`0`;
+  return eq(schema.documents.userId, userId);
 }
 
 export async function getDocument(db: Db, id: string, userId?: string) {

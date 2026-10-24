@@ -1,4 +1,6 @@
 import type { Context } from 'hono';
+import { isLocalDev } from './lib/env';
+import { verifyDevAutomationToken } from './lib/devAutomation';
 import { copyDocument } from './lib/guidanceCopy';
 import { renderGuidancePage, type GuidancePageData } from './web/guidancePage';
 import { getDocumentPermission } from './lib/documentShares';
@@ -25,7 +27,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { requestId } from './middleware/request-id';
 import { structuredLogger } from './middleware/logger';
 import { errorHandler } from './middleware/error-handler';
-import { authMiddleware } from './middleware/auth';
+import { authMiddleware, timingSafeEqual } from './middleware/auth';
 import { claudeRateLimit, documentRateLimit, generalRateLimit } from './middleware/rate-limit';
 import { bodySizeLimit, sanitizeInput } from './middleware/sanitize';
 import health from './routes/health';
@@ -488,8 +490,8 @@ function mcpUnauthorized(request: Request): Response {
  * user's documents. See scribe-mcp.ts for the handler-side fix.
  */
 async function resolveMcpIdentity(request: Request, env: Env): Promise<ScribeMcpProps | Response> {
-  if (env.ENVIRONMENT && env.ENVIRONMENT !== 'production') {
-    // Dev convenience — unscoped, matches the previous no-auth dev behavior.
+  if (isLocalDev(env)) {
+    // Local wrangler dev only — unscoped. Deployed environments (including dev) always authenticate.
     return { userId: '', email: '' };
   }
 
@@ -497,7 +499,7 @@ async function resolveMcpIdentity(request: Request, env: Env): Promise<ScribeMcp
   const bearerToken = /^Bearer\s+(.+)$/i.exec(authHeader)?.[1];
   if (!bearerToken) return mcpUnauthorized(request);
 
-  if (env.MCP_AUTH_TOKEN && bearerToken === env.MCP_AUTH_TOKEN) {
+  if (env.MCP_AUTH_TOKEN && (await timingSafeEqual(bearerToken, env.MCP_AUTH_TOKEN))) {
     // Fixed admin identity — same convention as the REST API's X-API-Key
     // branch (middleware/auth.ts) for this static, personal-use credential.
     const email = 'vishal@scribe.app';
@@ -507,7 +509,11 @@ async function resolveMcpIdentity(request: Request, env: Env): Promise<ScribeMcp
 
   if (isKindeJwt(bearerToken, env.KINDE_DOMAIN)) {
     const identity = await verifyKindeAccessToken(env, bearerToken);
-    if (!identity) return mcpUnauthorized(request);
+    if (!identity) {
+      // Dev Worker only: a client-credentials token for the fixed test user (no-op everywhere else).
+      const automation = await verifyDevAutomationToken(env, bearerToken);
+      return automation ?? mcpUnauthorized(request);
+    }
     return resolveAndUpsertKindeUser(env, identity);
   }
 

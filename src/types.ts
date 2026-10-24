@@ -24,6 +24,12 @@ export interface Env {
   KINDE_CLIENT_SECRET: string;
   SENTRY_DSN?: string;
   ENVIRONMENT?: string;
+  /** Dev Worker only: the Kinde M2M application allowed to act as the fixed test user (lib/devAutomation.ts). */
+  DEV_AUTOMATION_CLIENT_ID?: string;
+  /** Dev Worker only: the dev-only Kinde API audience that M2M token must be issued for. */
+  DEV_AUTOMATION_AUDIENCE?: string;
+  /** "true" only for local wrangler dev and tests. See lib/env.ts. */
+  LOCAL_DEV?: string;
   /** Dev only: secret for POST /api/auth/dev-session. Never set in prod. */
   DEV_LOGIN_SECRET?: string;
   ALLOWED_ORIGINS?: string;

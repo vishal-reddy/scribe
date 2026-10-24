@@ -26,10 +26,7 @@ feed.get('/', async (c) => {
   const userId = c.get('userId');
   const savedOnly = c.req.query('saved') === 'true';
 
-  const ownershipFilter = or(
-    eq(schema.feedPosts.userId, userId),
-    sql`${schema.feedPosts.userId} IS NULL`
-  );
+  const ownershipFilter = eq(schema.feedPosts.userId, userId);
   const where = savedOnly
     ? and(ownershipFilter, isNotNull(schema.feedPosts.savedAt))
     : ownershipFilter;
@@ -64,10 +61,7 @@ feed.post('/:id/save', async (c) => {
   const id = c.req.param('id');
   const userId = c.get('userId');
 
-  const ownershipFilter = or(
-    eq(schema.feedPosts.userId, userId),
-    sql`${schema.feedPosts.userId} IS NULL`
-  );
+  const ownershipFilter = eq(schema.feedPosts.userId, userId);
 
   try {
     const post = await db

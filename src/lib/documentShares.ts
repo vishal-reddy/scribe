@@ -35,12 +35,8 @@ export async function getDocumentPermission(
     return { canRead: false, canWrite: false, isOwner: false, role: null, source: null };
   }
 
-  // Legacy unowned documents
-  if (!doc.userId) {
-    return { canRead: true, canWrite: true, isOwner: true, role: 'owner', source: 'legacy' };
-  }
-
-  if (!userId) {
+  // Ownerless documents grant nothing to anyone (they used to grant everyone full access).
+  if (!doc.userId || !userId) {
     return { canRead: false, canWrite: false, isOwner: false, role: null, source: null };
   }
 

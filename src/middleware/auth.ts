@@ -3,6 +3,8 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../types';
+import { isLocalDev } from '../lib/env';
+import { verifyDevAutomationToken } from '../lib/devAutomation';
 import { isKindeJwt, verifyKindeAccessToken, resolveAndUpsertKindeUser } from '../lib/kinde';
 
 // --- JWKS cache ---
@@ -29,7 +31,7 @@ interface CachedKeys {
 
 const JWKS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+export async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   const enc = new TextEncoder();
   const [ha, hb] = await Promise.all([
     crypto.subtle.digest('SHA-256', enc.encode(a)),
@@ -188,8 +190,8 @@ function parseJWTDev(token: string): JWTPayload | null {
 
 /**
  * Cloudflare Access JWT Middleware
- * - Production: full RS256 signature verification via JWKS + claim validation
- * - Development: simplified JWT decode (no signature verification)
+ * - Every deployed environment: full RS256 signature verification via JWKS + claim validation
+ * - LOCAL_DEV=true only (wrangler dev, tests): simplified JWT decode (no signature verification)
  */
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
   // API Key auth — fixed admin identity, no impersonation
@@ -236,7 +238,18 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
     // left intact). Route by issuer rather than assuming either.
     if (isKindeJwt(token, c.env.KINDE_DOMAIN)) {
       const identity = await verifyKindeAccessToken(c.env, token);
-      if (!identity) return c.json({ error: 'Unauthorized: Invalid Kinde token' }, 401);
+      if (!identity) {
+        // Dev Worker only: a client-credentials token for the fixed test user (no-op everywhere else).
+        const automation = await verifyDevAutomationToken(c.env, token);
+        if (automation) {
+          c.set('userId', automation.userId);
+          c.set('userEmail', automation.email);
+          c.set('userName', 'Dev Tester');
+          await next();
+          return;
+        }
+        return c.json({ error: 'Unauthorized: Invalid Kinde token' }, 401);
+      }
 
       const { userId, email } = await resolveAndUpsertKindeUser(c.env, identity);
       const db = drizzle(c.env.DB, { schema });
@@ -257,7 +270,8 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
     return c.json({ error: 'Unauthorized: No token provided' }, 401);
   }
 
-  const isProduction = c.env.ENVIRONMENT === 'production';
+  // Fail closed: signatures are verified everywhere except an explicit local-dev flag.
+  const isProduction = !isLocalDev(c.env);
 
   try {
     let payload: JWTPayload | null;
@@ -349,7 +363,7 @@ export async function optionalAuth(c: Context<{ Bindings: Env }>, next: Next) {
 
   if (token) {
     try {
-      const isProduction = c.env.ENVIRONMENT === 'production';
+      const isProduction = !isLocalDev(c.env);
       let payload: JWTPayload | null = null;
 
       if (isProduction) {

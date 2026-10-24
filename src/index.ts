@@ -266,6 +266,15 @@ async function guidanceView(c: Context<{ Bindings: Env }>, userId: string, email
   });
 }
 
+// The page is plain forms with inline styles: no scripts, no third-party loads, never framed. A CSP backs up the escaping.
+app.use('/guidance', async (c, next) => {
+  await next();
+  c.header(
+    'Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+  );
+});
+
 app.get('/guidance', async (c) => {
   const session = await readSession(c);
   if (!session) return c.redirect('/auth/kinde/login?return_to=%2Fguidance');

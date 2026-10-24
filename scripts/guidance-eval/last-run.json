@@ -1,0 +1,19 @@
+[
+  {
+    "model": "agy:gemini-3.8-flash-medium",
+    "scenario": "think-first",
+    "seconds": 35,
+    "tools": [
+      "get_writing_guidance",
+      "list_documents",
+      "read_document"
+    ],
+    "checks": {
+      "ran": true,
+      "asked_a_question": true,
+      "did_not_draft_yet": true,
+      "stayed_short": true
+    },
+    "reply": "To help get your own thoughts and voice onto the page, let’s start with a couple of questions:\n\n1. **What kind of suffering are you thinking about?** Does a specific experience come to mind—such as the voluntary strain of hard discipline, grief, or unjust, unchosen pain?\n2. **Is the suffering itself good, or only what comes out of it?** Do you lean toward thinking suffering has inherent value, or that it is bad in itself but can sometimes be redeemed by growth, empathy, or endurance?\n\n*(Tip: If you're wrestling with how to phrase it, it can help to say your thoughts aloud or dictate a few messy sentences first.)*\n\nWhenever you're ready, share whatever comes to mind—even rough fragments—and we can shape them into a note, or I can pull together an initial draft for you to react to."
+  }
+]

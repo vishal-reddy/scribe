@@ -1,3 +1,24 @@
+import type { Context } from 'hono';
+import { copyDocument } from './lib/guidanceCopy';
+import { renderGuidancePage, type GuidancePageData } from './web/guidancePage';
+import { getDocumentPermission } from './lib/documentShares';
+import { resolveScope } from './lib/orgs';
+import {
+  GUIDANCE_MAX_LENGTH,
+  LockedGuidanceError,
+  authorGuidanceFor,
+  isTemplate,
+  setTemplate,
+  cleanGuidanceText,
+  defaultGuidance,
+  effectiveGuidance,
+  getGuidanceLayer,
+  parseGuidanceMode,
+  setAdoption,
+  setAuthorGuidance,
+  setGuidanceLayer,
+  validateAuthorText,
+} from './lib/writingGuidance';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
@@ -13,6 +34,7 @@ import documents from './routes/documents';
 import feed from './routes/feed';
 import tags from './routes/tags';
 import settings from './routes/settings';
+import { guidance } from './routes/guidance';
 import orgs from './routes/orgs';
 import claude from './routes/claude';
 import auth from './routes/auth';
@@ -38,7 +60,7 @@ const _esc = (s: string) =>
 function renderLandingPage(session: SessionData | null, origin: string): string {
 
   const navRight = session
-    ? `<a href="/connect" class="nav-link">Connect Claude</a><span class="nav-email">${_esc(session.email)}</span><a href="/auth/logout" class="nav-ghost">Sign out</a>`
+    ? `<a href="/connect" class="nav-link">Connect Claude</a><a href="/guidance" class="nav-link">Writing guidance</a><span class="nav-email">${_esc(session.email)}</span><a href="/auth/logout" class="nav-ghost">Sign out</a>`
     : `<a href="/connect" class="nav-link">Connect Claude</a><a href="/auth/kinde/login" class="nav-link">Sign in</a><a href="/auth/kinde/login" class="nav-btn">Get started</a>`;
 
   const heroCta = session
@@ -207,6 +229,125 @@ app.get('/', async (c) => {
   return c.html(renderLandingPage(session, appBaseUrl(c.env)));
 });
 
+// ── Writing guidance (signed-in web page) ─────────────────────────────────────────────────────────────────────────
+// The same layers the mobile apps edit through /api/guidance, as plain forms. Auth is the web session cookie.
+async function guidanceView(c: Context<{ Bindings: Env }>, userId: string, email: string, docId: string | null, notice: string | null, error: string | null) {
+  const activeOrgId = await resolveScope(c.env, userId);
+  const rows = await c.env.DB.prepare(
+    `SELECT id, title FROM documents WHERE user_id = ? OR org_id = ? OR user_id IS NULL ORDER BY updated_at DESC LIMIT 100`
+  ).bind(userId, activeOrgId).all<{ id: string; title: string }>();
+
+  let selected: GuidancePageData['selected'] = null;
+  if (docId) {
+    const perm = await getDocumentPermission(c.env, docId, userId, activeOrgId);
+    const doc = perm.canRead
+      ? await c.env.DB.prepare('SELECT id, title, user_id AS userId FROM documents WHERE id = ?').bind(docId).first<{ id: string; title: string; userId: string | null }>()
+      : null;
+    if (doc) {
+      selected = {
+        id: doc.id,
+        title: doc.title,
+        layer: await getGuidanceLayer(c.env, userId, doc.id),
+        author: await authorGuidanceFor(c.env, userId, doc.id),
+        isOwner: doc.userId === userId,
+        isTemplate: await isTemplate(c.env, doc.id),
+      };
+    }
+  }
+  return renderGuidancePage({
+    email,
+    defaultText: defaultGuidance(c.env),
+    userLayer: await getGuidanceLayer(c.env, userId),
+    documents: rows.results ?? [],
+    selected,
+    effective: (await effectiveGuidance(c.env, userId, selected?.id)).text,
+    notice,
+    error,
+  });
+}
+
+app.get('/guidance', async (c) => {
+  const session = await readSession(c);
+  if (!session) return c.redirect('/auth/kinde/login?return_to=%2Fguidance');
+  const notice = c.req.query('saved') ? 'Saved.' : null;
+  return c.html(await guidanceView(c, session.user_id, session.email, c.req.query('doc') || null, notice, null));
+});
+
+app.post('/guidance', async (c) => {
+  const session = await readSession(c);
+  if (!session) return c.redirect('/auth/kinde/login?return_to=%2Fguidance');
+  // The session cookie is SameSite=Lax, and a form post must also come from this site.
+  const origin = c.req.header('Origin');
+  if (origin && new URL(origin).host !== new URL(c.req.url).host) return c.text('Forbidden', 403);
+
+  const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, string>;
+  const userId = session.user_id;
+  const docId = (body.doc || '').trim() || null;
+  const back = (msg?: string, err?: string) =>
+    msg ? c.redirect(`/guidance?${docId ? `doc=${encodeURIComponent(docId)}&` : ''}saved=1`) : null;
+
+  const fail = async (error: string) => c.html(await guidanceView(c, userId, session.email, docId, null, error), 400);
+  const mode = parseGuidanceMode(body.mode ?? 'append');
+
+  switch (body.action) {
+    case 'save_user': {
+      const text = cleanGuidanceText(body.text ?? '');
+      if (text === null || !mode) return fail(`Guidance can be up to ${GUIDANCE_MAX_LENGTH} characters.`);
+      await setGuidanceLayer(c.env, userId, '', text, mode);
+      return back('ok')!;
+    }
+    case 'save_doc':
+    case 'save_author':
+    case 'adopt':
+    case 'unadopt':
+    case 'set_template':
+    case 'copy_use':
+    case 'copy_fork': {
+      if (!docId) return fail('Choose a note first.');
+      const activeOrgId = await resolveScope(c.env, userId);
+      if (!(await getDocumentPermission(c.env, docId, userId, activeOrgId)).canRead) return fail('That note was not found.');
+
+      if (body.action === 'save_doc') {
+        const text = cleanGuidanceText(body.text ?? '');
+        if (text === null || !mode) return fail(`Guidance can be up to ${GUIDANCE_MAX_LENGTH} characters.`);
+        await setGuidanceLayer(c.env, userId, docId, text, mode);
+      } else if (body.action === 'set_template') {
+        const owner = await c.env.DB.prepare('SELECT user_id AS userId FROM documents WHERE id = ?').bind(docId).first<{ userId: string | null }>();
+        if (!owner || owner.userId !== userId) return fail("Only the note's owner can publish it as a template.");
+        await setTemplate(c.env, docId, body.template === 'true');
+      } else if (body.action === 'copy_use' || body.action === 'copy_fork') {
+        const out = await copyDocument(
+          c.env,
+          { userId, email: session.email, name: session.email.split('@')[0], activeOrgId },
+          docId,
+          body.action === 'copy_use' ? 'use' : 'fork',
+          { acceptVersion: Number(body.version) }
+        );
+        if (!out.ok) return fail(out.error);
+        return c.redirect(`/guidance?doc=${encodeURIComponent(out.documentId)}&saved=1`);
+      } else if (body.action === 'save_author') {
+        const owner = await c.env.DB.prepare('SELECT user_id AS userId FROM documents WHERE id = ?').bind(docId).first<{ userId: string | null }>();
+        if (!owner || owner.userId !== userId) return fail("Only the note's owner can attach instructions for its readers.");
+        const checked = validateAuthorText(body.text ?? '');
+        if ('error' in checked) return fail(checked.error);
+        try {
+          await setAuthorGuidance(c.env, docId, userId, session.email.split('@')[0], checked.text);
+        } catch (e) {
+          if (e instanceof LockedGuidanceError) return fail(e.message);
+          throw e;
+        }
+      } else {
+        const result = await setAdoption(c.env, userId, docId, body.action === 'adopt', Number(body.version));
+        if (result === 'stale') return fail('The instructions changed. Review the new version first.');
+        if (result === 'none') return fail('This note has no shared instructions.');
+      }
+      return back('ok')!;
+    }
+    default:
+      return fail('Unknown action.');
+  }
+});
+
 // Public "Connect Claude" setup guide (no auth — it's how new users get started).
 app.get('/connect', (c) => c.html(renderConnectPage({ ...SCRIBE_CONNECT, mcpUrl: `${appBaseUrl(c.env)}/mcp` })));
 
@@ -297,6 +438,7 @@ app.route('/api/documents', documents);
 app.route('/api/feed', feed);
 app.route('/api/tags', tags);
 app.route('/api/settings', settings);
+app.route('/api/guidance', guidance);
 app.route('/api/orgs', orgs);
 app.use('/api/claude/*', claudeRateLimit);
 app.route('/api/claude', claude);

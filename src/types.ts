@@ -24,6 +24,8 @@ export interface Env {
   KINDE_CLIENT_SECRET: string;
   SENTRY_DSN?: string;
   ENVIRONMENT?: string;
+  /** "true" only for local wrangler dev and tests. See lib/env.ts. */
+  LOCAL_DEV?: string;
   /** Dev only: secret for POST /api/auth/dev-session. Never set in prod. */
   DEV_LOGIN_SECRET?: string;
   ALLOWED_ORIGINS?: string;

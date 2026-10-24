@@ -1,3 +1,4 @@
+import { isLocalDev } from './env';
 import type { Env } from '../types';
 import { appBaseUrl } from './urls';
 import { promoteSharedOrg } from './orgs';
@@ -61,7 +62,7 @@ export async function sendOrgInviteEmail(
   params: { to: string; orgName: string; invitedByEmail: string | null; inviteUrl: string }
 ): Promise<boolean> {
   if (!env.RESEND_API_KEY) {
-    if (env.ENVIRONMENT !== 'production') {
+    if (isLocalDev(env)) {
       console.log(`[DEV] Org Invite Email to ${params.to}: ${params.inviteUrl}`);
     }
     return false;

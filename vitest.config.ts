@@ -10,6 +10,7 @@ export default defineConfig({
         bindings: {
           ANTHROPIC_API_KEY: 'test-key',
           ENVIRONMENT: 'test',
+          LOCAL_DEV: 'true',
         },
       },
     }),

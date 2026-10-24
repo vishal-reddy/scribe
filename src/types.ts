@@ -35,12 +35,6 @@ export interface Env {
   HUB_AUDIENCE?: string;
   /** "off" removes the writing-coach section from the MCP server instructions (default on). */
   WRITING_GUIDANCE?: string;
-  /** This deployment's public origin, e.g. https://scribe-dev.kecker.co. Unset in prod (it derives from ENVIRONMENT). */
-  APP_BASE_URL?: string;
-  /** The Kecker MCP hub origin for quota reporting and token audience. Unset means prod (https://mcp.kecker.co). */
-  HUB_URL?: string;
-  /** Audience of hub-forwarded tokens. Unset means https://mcp.kecker.co in every environment (dev reuses prod Kinde). */
-  HUB_AUDIENCE?: string;
 }
 
 // Add context variables type

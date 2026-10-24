@@ -347,4 +347,46 @@ auth.post('/logout', async (c) => {
   }
 });
 
+/**
+ * Dev-only test login — lets emulators, simulators and CI sign in without email.
+ * POST /api/auth/dev-session   header: X-Dev-Login: <DEV_LOGIN_SECRET>
+ *
+ * Exists only on a deployment whose ENVIRONMENT is "development" AND that has DEV_LOGIN_SECRET set. Anywhere else
+ * (including prod, which has neither) it answers 404, as if the route did not exist. It signs in ONE fixed test user.
+ */
+const DEV_TEST_EMAIL = 'dev-tester@kecker.co';
+
+auth.post('/dev-session', async (c) => {
+  const secret = c.env.DEV_LOGIN_SECRET;
+  if (c.env.ENVIRONMENT !== 'development' || !secret) return c.notFound();
+  const presented = c.req.header('X-Dev-Login') ?? '';
+  if (!(await timingSafeEqualStr(presented, secret))) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  let user = await db.select().from(schema.users).where(eq(schema.users.email, DEV_TEST_EMAIL)).get();
+  if (!user) {
+    const id = await sha256(DEV_TEST_EMAIL);
+    await db.insert(schema.users).values({ id, email: DEV_TEST_EMAIL, createdAt: new Date(), isVerified: true, name: 'Dev Tester' });
+    user = await db.select().from(schema.users).where(eq(schema.users.id, id)).get();
+  }
+  if (!user) return c.json({ error: 'Could not create the test user' }, 500);
+  const { token, refreshToken, expiresAt } = await issueTokenPair(db, user.id);
+  return c.json({
+    success: true,
+    token,
+    refreshToken,
+    user: { id: user.id, email: user.email, name: user.name || 'Dev Tester' },
+    expiresAt: expiresAt.toISOString(),
+  });
+});
+
+async function timingSafeEqualStr(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(a)), crypto.subtle.digest('SHA-256', enc.encode(b))]);
+  const va = new Uint8Array(ha), vb = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < va.length; i++) diff |= va[i]! ^ vb[i]!;
+  return diff === 0;
+}
+
 export default auth;

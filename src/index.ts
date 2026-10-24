@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { isLocalDev } from './lib/env';
+import { verifyDevAutomationToken } from './lib/devAutomation';
 import { copyDocument } from './lib/guidanceCopy';
 import { renderGuidancePage, type GuidancePageData } from './web/guidancePage';
 import { getDocumentPermission } from './lib/documentShares';
@@ -508,7 +509,11 @@ async function resolveMcpIdentity(request: Request, env: Env): Promise<ScribeMcp
 
   if (isKindeJwt(bearerToken, env.KINDE_DOMAIN)) {
     const identity = await verifyKindeAccessToken(env, bearerToken);
-    if (!identity) return mcpUnauthorized(request);
+    if (!identity) {
+      // Dev Worker only: a client-credentials token for the fixed test user (no-op everywhere else).
+      const automation = await verifyDevAutomationToken(env, bearerToken);
+      return automation ?? mcpUnauthorized(request);
+    }
     return resolveAndUpsertKindeUser(env, identity);
   }
 

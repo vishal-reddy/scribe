@@ -20,7 +20,7 @@ import type { Env } from '../types';
 let jwks: ReturnType<typeof jose.createRemoteJWKSet> | null = null;
 let jwksDomain: string | null = null;
 
-function getJwks(domain: string) {
+export function getJwks(domain: string) {
   if (!jwks || jwksDomain !== domain) {
     jwks = jose.createRemoteJWKSet(new URL(`${domain}/.well-known/jwks.json`));
     jwksDomain = domain;

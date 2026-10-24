@@ -80,6 +80,10 @@ KINDE_DOMAIN = "https://kecker.kinde.com"
 KINDE_CLIENT_ID = "4e98217c88d24e728fc3b0c15e73e770"
 # Dev reuses the prod Kinde configuration (same API audience), so no extra Kinde setup is needed.
 KINDE_AUDIENCE = "https://scribe.kecker.co"
+# Emulator/simulator automation signs in with a Kinde client-credentials token for the fixed dev test user. Dev only:
+# the M2M app ("Kecker Dev Automation") is authorized for the dev-only API audience below and for no production API.
+DEV_AUTOMATION_CLIENT_ID = "a760e4261a014c7c8386ffa71a5deba7"
+DEV_AUTOMATION_AUDIENCE = "https://scribe-dev.kecker.co"
 
 [[env.dev.durable_objects.bindings]]
 name = "DOCUMENT_SYNC"

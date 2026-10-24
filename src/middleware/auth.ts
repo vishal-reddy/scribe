@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../types';
 import { isLocalDev } from '../lib/env';
+import { verifyDevAutomationToken } from '../lib/devAutomation';
 import { isKindeJwt, verifyKindeAccessToken, resolveAndUpsertKindeUser } from '../lib/kinde';
 
 // --- JWKS cache ---
@@ -237,7 +238,18 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
     // left intact). Route by issuer rather than assuming either.
     if (isKindeJwt(token, c.env.KINDE_DOMAIN)) {
       const identity = await verifyKindeAccessToken(c.env, token);
-      if (!identity) return c.json({ error: 'Unauthorized: Invalid Kinde token' }, 401);
+      if (!identity) {
+        // Dev Worker only: a client-credentials token for the fixed test user (no-op everywhere else).
+        const automation = await verifyDevAutomationToken(c.env, token);
+        if (automation) {
+          c.set('userId', automation.userId);
+          c.set('userEmail', automation.email);
+          c.set('userName', 'Dev Tester');
+          await next();
+          return;
+        }
+        return c.json({ error: 'Unauthorized: Invalid Kinde token' }, 401);
+      }
 
       const { userId, email } = await resolveAndUpsertKindeUser(c.env, identity);
       const db = drizzle(c.env.DB, { schema });

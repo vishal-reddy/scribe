@@ -169,17 +169,20 @@ export async function removeOrgAccountMember(env: Env, orgId: string, requesterI
 }
 
 /**
- * Kinde is the source of truth for who is in a business org. Given the org codes in a user's token, make their
- * membership in every Kinde-linked org match (add the missing, drop the ones no longer listed). Only orgs an admin has
- * linked to a Kinde org code are touched, and the org owner is never removed. Call it only when the token carries the claim.
+ * Kinde is the source of truth for who is in a business org. Only orgs an admin has linked to a Kinde org code are touched.
+ *  - `orgCodes` (the user's full list, when a token carries it): membership of every linked org is made to match it
+ *    (add the missing, drop the ones no longer listed). The org owner is never removed.
+ *  - `orgCode` only (the org the user signed in under, which every Kinde access token carries): additive. It adds the
+ *    user to that linked org and never removes anyone, because one org says nothing about the others.
  */
-export async function syncKindeOrgMembership(env: Env, userId: string, orgCodes: string[]): Promise<void> {
+export async function syncKindeOrgMembership(env: Env, userId: string, claims: { orgCode?: string; orgCodes?: string[] }): Promise<void> {
   const { results } = await env.DB.prepare("SELECT id, kinde_org_code AS code, owner_user_id AS owner FROM orgs WHERE kinde_org_code IS NOT NULL").all<{ id: string; code: string; owner: string }>();
   const now = Date.now();
   for (const o of results) {
-    if (orgCodes.includes(o.code)) {
+    const listed = claims.orgCodes ? claims.orgCodes.includes(o.code) : claims.orgCode === o.code;
+    if (listed) {
       await env.DB.prepare("INSERT OR IGNORE INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)").bind(o.id, userId, now).run();
-    } else if (o.owner !== userId) {
+    } else if (claims.orgCodes && o.owner !== userId) {
       await env.DB.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(o.id, userId).run();
     }
   }

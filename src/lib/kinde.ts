@@ -34,7 +34,9 @@ export interface KindeIdentity {
   sub: string;
   /** May be empty — Kinde's access token doesn't always carry it depending on dashboard config. */
   email: string;
-  /** Kinde org codes from the token's `org_codes` claim, when the dashboard is set to include it. Undefined = claim absent. */
+  /** The Kinde org the user signed in under (the access token's `org_code`, always present). */
+  orgCode?: string;
+  /** All of the user's Kinde org codes (`org_codes`, an ID-token claim), when a token carries it. Undefined = claim absent. */
   orgCodes?: string[];
 }
 
@@ -53,7 +55,8 @@ export async function verifyKindeAccessToken(env: Env, token: string): Promise<K
     if (typeof payload.sub !== 'string') return null;
     const email = typeof payload.email === 'string' ? payload.email : '';
     const orgCodes = Array.isArray(payload.org_codes) ? payload.org_codes.filter((c): c is string => typeof c === 'string') : undefined;
-    return { sub: payload.sub, email, orgCodes };
+    const orgCode = typeof payload.org_code === 'string' && payload.org_code ? payload.org_code : undefined;
+    return { sub: payload.sub, email, orgCode, orgCodes };
   } catch {
     return null;
   }
@@ -103,9 +106,9 @@ export async function resolveAndUpsertKindeUser(
   } else if (!existing.lastLoginAt || Date.now() - existing.lastLoginAt.getTime() > 60_000) {
     await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, userId));
   }
-  // Kinde decides who is in each linked business org: when the token carries the org claim, make membership match it.
-  if (identity.orgCodes) {
-    try { await syncKindeOrgMembership(env, userId, identity.orgCodes); } catch (e) { console.warn('Kinde org sync failed:', e); }
+  // Kinde decides who is in each linked business org (see syncKindeOrgMembership).
+  if (identity.orgCodes || identity.orgCode) {
+    try { await syncKindeOrgMembership(env, userId, { orgCode: identity.orgCode, orgCodes: identity.orgCodes }); } catch (e) { console.warn('Kinde org sync failed:', e); }
   }
   return { userId, email: identity.email || existing?.email || '' };
 }

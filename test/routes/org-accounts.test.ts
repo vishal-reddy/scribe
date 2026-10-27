@@ -129,14 +129,28 @@ describe('orgs, workspaces and visibility', () => {
     const stranger = 'kinde-newcomer@example.com';
     await signUp(stranger);
     const sid = await userIdFor(stranger);
-    await syncKindeOrgMembership(env, sid, ['org_acme']);
+    await syncKindeOrgMembership(env, sid, { orgCodes: ['org_acme'] });
     expect((await json(await call(stranger, 'GET', '/api/org-accounts'))).orgs.map((o: any) => o.id)).toEqual([org]);
 
-    await syncKindeOrgMembership(env, sid, []); // removed from the Kinde org
+    await syncKindeOrgMembership(env, sid, { orgCodes: [] }); // removed from the Kinde org
     expect((await json(await call(stranger, 'GET', '/api/org-accounts'))).orgs).toEqual([]);
 
-    await syncKindeOrgMembership(env, await userIdFor(owner), []); // the owner is never dropped
+    await syncKindeOrgMembership(env, await userIdFor(owner), { orgCodes: [] }); // the owner is never dropped
     expect((await json(await call(owner, 'GET', '/api/org-accounts'))).orgs.map((o: any) => o.id)).toContain(org);
     expect((await json(await call(owner, 'GET', '/api/org-accounts'))).orgs.map((o: any) => o.id)).toContain(other);
+  });
+
+  it('adds the org a user signed in under, without removing anything', async () => {
+    const { org } = await makeOrgWithWorkspace();
+    await call(owner, 'PUT', `/api/org-accounts/${org}/kinde`, { kindeOrgCode: 'org_signin' });
+    const who = 'kinde-signin@example.com';
+    await signUp(who);
+    const id = await userIdFor(who);
+    await syncKindeOrgMembership(env, id, { orgCode: 'org_other' }); // not a linked org: nothing happens
+    expect((await json(await call(who, 'GET', '/api/org-accounts'))).orgs).toEqual([]);
+    await syncKindeOrgMembership(env, id, { orgCode: 'org_signin' });
+    expect((await json(await call(who, 'GET', '/api/org-accounts'))).orgs.map((o: any) => o.id)).toEqual([org]);
+    await syncKindeOrgMembership(env, id, { orgCode: 'org_other' }); // signing in under another org never drops this one
+    expect((await json(await call(who, 'GET', '/api/org-accounts'))).orgs.map((o: any) => o.id)).toEqual([org]);
   });
 });

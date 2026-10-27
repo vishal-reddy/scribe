@@ -3,6 +3,7 @@ import { appBaseUrl } from '../lib/urls';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
+import { WORKSPACE_VISIBILITIES, setWorkspaceVisibility } from '../lib/orgAccounts';
 import {
   createOrganization,
   listOrganizationsForUser,
@@ -41,15 +42,32 @@ orgs.get('/', async (c) => {
 
 const createOrgSchema = z.object({
   name: z.string().min(1).max(100).transform((s) => s.trim()),
+  /** Put the new workspace in this org (caller must be an owner/admin of it). Default: the caller's hidden personal org. */
+  orgAccountId: z.string().min(1).optional(),
 });
 
 // POST /api/orgs { name } — create a new shared workspace
 orgs.post('/', zValidator('json', createOrgSchema), async (c) => {
   const userId = c.get('userId');
-  const { name } = c.req.valid('json');
-  const id = await createOrganization(c.env, userId, name);
+  const { name, orgAccountId } = c.req.valid('json');
+  let id: string;
+  try {
+    id = await createOrganization(c.env, userId, name, orgAccountId);
+  } catch (e) {
+    return forbidden(c, e);
+  }
   const orgObj = { id, name, role: 'owner', isPersonal: false, isActive: true };
   return c.json({ ...orgObj, organization: orgObj }, 201);
+});
+
+// PATCH /api/orgs/:id/settings { visibility } — who in the parent org can see this workspace without being added to it.
+orgs.patch('/:id/settings', zValidator('json', z.object({ visibility: z.enum(['inherit', ...WORKSPACE_VISIBILITIES] as [string, ...string[]]) })), async (c) => {
+  try {
+    await setWorkspaceVisibility(c.env, c.req.param('id'), c.get('userId'), c.req.valid('json').visibility as any);
+    return c.json({ success: true });
+  } catch (e) {
+    return forbidden(c, e);
+  }
 });
 
 const switchOrgSchema = z.object({

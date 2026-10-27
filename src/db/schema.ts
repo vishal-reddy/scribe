@@ -137,12 +137,35 @@ export const feedPosts = sqliteTable('feed_posts', {
   index('idx_feed_posts_saved_at').on(table.savedAt),
 ]);
 
-// Organizations (shared workspaces)
+// Orgs: business accounts that own many workspaces. Every user also has a hidden personal org (isPersonal).
+export const orgs = sqliteTable('orgs', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  isPersonal: integer('is_personal', { mode: 'boolean' }).notNull().default(false),
+  ownerUserId: text('owner_user_id').notNull(),
+  kindeOrgCode: text('kinde_org_code'),
+  workspaceVisibility: text('workspace_visibility').notNull().default('org_members'), // org_members | org_admins | invite_only
+  createdAt: integer('created_at').notNull(),
+});
+
+export const orgMembers = sqliteTable('org_members', {
+  orgId: text('org_id').notNull(),
+  userId: text('user_id').notNull(),
+  role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member'
+  joinedAt: integer('joined_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.userId] }),
+  index('idx_org_members_user_id').on(table.userId),
+]);
+
+// Workspaces (the table keeps its older name `organizations`); each belongs to an org
 export const organizations = sqliteTable('organizations', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   isPersonal: integer('is_personal', { mode: 'boolean' }).notNull().default(false),
   ownerUserId: text('owner_user_id').notNull(),
+  orgId: text('org_id'), // the org this workspace belongs to
+  visibility: text('visibility').notNull().default('inherit'), // inherit | org_members | org_admins | invite_only
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

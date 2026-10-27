@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import type { Env } from '../types';
+import { syncKindeOrgMembership } from './orgAccounts';
 
 /**
  * Verifies a Kinde-issued access token — the credential Scribe's iOS and
@@ -33,6 +34,8 @@ export interface KindeIdentity {
   sub: string;
   /** May be empty — Kinde's access token doesn't always carry it depending on dashboard config. */
   email: string;
+  /** Kinde org codes from the token's `org_codes` claim, when the dashboard is set to include it. Undefined = claim absent. */
+  orgCodes?: string[];
 }
 
 // kecker-mcp-hub forwards a Kinde access token it obtained for ITS OWN
@@ -49,7 +52,8 @@ export async function verifyKindeAccessToken(env: Env, token: string): Promise<K
     });
     if (typeof payload.sub !== 'string') return null;
     const email = typeof payload.email === 'string' ? payload.email : '';
-    return { sub: payload.sub, email };
+    const orgCodes = Array.isArray(payload.org_codes) ? payload.org_codes.filter((c): c is string => typeof c === 'string') : undefined;
+    return { sub: payload.sub, email, orgCodes };
   } catch {
     return null;
   }
@@ -98,6 +102,10 @@ export async function resolveAndUpsertKindeUser(
     }).onConflictDoNothing();
   } else if (!existing.lastLoginAt || Date.now() - existing.lastLoginAt.getTime() > 60_000) {
     await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, userId));
+  }
+  // Kinde decides who is in each linked business org: when the token carries the org claim, make membership match it.
+  if (identity.orgCodes) {
+    try { await syncKindeOrgMembership(env, userId, identity.orgCodes); } catch (e) { console.warn('Kinde org sync failed:', e); }
   }
   return { userId, email: identity.email || existing?.email || '' };
 }

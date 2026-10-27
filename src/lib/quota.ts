@@ -44,7 +44,7 @@ export async function calculateScribeStorageBytes(
          COALESCE(SUM(LENGTH(COALESCE(content, '')) + LENGTH(COALESCE(markdown, '')) + LENGTH(COALESCE(title, ''))), 0) as total_bytes,
          COUNT(*) as doc_count
        FROM documents
-       WHERE userId = ?`
+       WHERE user_id = ?`
     ).bind(userId).first<{ total_bytes: number; doc_count: number }>();
 
     return {

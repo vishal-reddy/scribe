@@ -30,8 +30,6 @@ export interface Env {
   DEV_AUTOMATION_AUDIENCE?: string;
   /** "true" only for local wrangler dev and tests. See lib/env.ts. */
   LOCAL_DEV?: string;
-  /** Dev only: secret for POST /api/auth/dev-session. Never set in prod. */
-  DEV_LOGIN_SECRET?: string;
   ALLOWED_ORIGINS?: string;
   /** This deployment's public origin, e.g. https://scribe-dev.kecker.co. Unset in prod (it derives from ENVIRONMENT). */
   APP_BASE_URL?: string;

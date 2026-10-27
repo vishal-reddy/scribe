@@ -39,6 +39,13 @@ describe('deployed environments fail closed', () => {
     expect(JSON.stringify(await res.json())).not.toMatch(/devOtp|\d{6}/);
   });
 
+  it('has no dev-session login route (replaced by Kinde client credentials)', async () => {
+    for (const e of [deployedDev, env]) {
+      const res = await app.request('/api/auth/dev-session', { method: 'POST', headers: { 'X-Dev-Login': 'anything' } }, e);
+      expect([401, 404]).toContain(res.status);
+    }
+  });
+
   it('requires credentials on /mcp for a deployed Worker', async () => {
     // /mcp is served by the Worker's combined fetch handler (McpAgent), not the Hono app.
     const mcp = (e: typeof env) => {

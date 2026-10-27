@@ -608,6 +608,53 @@ documents.post('/:id/persist', async (c) => {
 });
 
 /**
+ * Publish / unpublish a document as a public read-only page at /d/:id.
+ * POST /api/documents/:id/publish, DELETE /api/documents/:id/publish, GET /api/documents/:id/publish.
+ * Only the owner (or an org admin) can change it. Nothing is public until this is called.
+ */
+async function publishAccess(c: any, documentId: string): Promise<Response | null> {
+  const userId = c.get('userId');
+  const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+  const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+  if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
+  if (!(perm.isOwner || perm.role === 'admin')) return c.json({ error: 'Forbidden: only the owner can publish' }, 403);
+  return null;
+}
+
+documents.get('/:id/publish', async (c) => {
+  const documentId = c.req.param('id');
+  const denied = await publishAccess(c, documentId);
+  if (denied) return denied;
+  const row = await c.env.DB.prepare('SELECT visibility FROM published_documents WHERE document_id = ?').bind(documentId).first<{ visibility: string }>();
+  return c.json({ published: !!row, visibility: row?.visibility ?? null, url: row ? `/d/${documentId}` : null });
+});
+
+documents.post('/:id/publish', async (c) => {
+  const documentId = c.req.param('id');
+  const denied = await publishAccess(c, documentId);
+  if (denied) return denied;
+  const body = await c.req.json<{ visibility?: string }>().catch(() => ({} as { visibility?: string }));
+  const visibility = body.visibility === 'org' ? 'org' : 'public';
+  if (visibility === 'org') {
+    const doc = await c.env.DB.prepare('SELECT org_id FROM documents WHERE id = ?').bind(documentId).first<{ org_id: string | null }>();
+    if (!doc?.org_id) return c.json({ error: 'Organization-only links need a document in an organization workspace' }, 400);
+  }
+  await c.env.DB.prepare(
+    `INSERT INTO published_documents (document_id, published_by, published_at, visibility) VALUES (?, ?, ?, ?)
+     ON CONFLICT(document_id) DO UPDATE SET visibility = excluded.visibility`
+  ).bind(documentId, c.get('userId'), Math.floor(Date.now() / 1000), visibility).run();
+  return c.json({ published: true, visibility, url: `/d/${documentId}` });
+});
+
+documents.delete('/:id/publish', async (c) => {
+  const documentId = c.req.param('id');
+  const denied = await publishAccess(c, documentId);
+  if (denied) return denied;
+  await c.env.DB.prepare('DELETE FROM published_documents WHERE document_id = ?').bind(documentId).run();
+  return c.json({ published: false, url: null });
+});
+
+/**
  * File a previously-created document under a Thomistic category.
  * The caller (Claude over MCP, or a manual picker) supplies the category;
  * the server creates the category folder if needed and sets the parent.

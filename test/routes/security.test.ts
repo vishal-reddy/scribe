@@ -80,3 +80,58 @@ describe('ownerless rows grant nothing', () => {
     expect((await app.request(`/api/sync/${id}/ws`, { headers }, env)).status).toBe(404);
   });
 });
+
+describe('/d/:id public links are opt-in', () => {
+  it('serves a document only after its owner publishes it, and not after unpublishing', async () => {
+    const { getAuthHeaders, userIdFor } = await import('../helpers');
+    const ownerEmail = 'owner@example.com';
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO documents (id, user_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, ?, 'Mine', '', 'public body', ?, ?, 'user', 'user')`
+    ).bind(id, await userIdFor(ownerEmail), now, now).run();
+
+    const owner = getAuthHeaders(ownerEmail);
+    const stranger = getAuthHeaders('stranger@example.com');
+    const publish = (method: string, headers: Record<string, string>) => app.request(`/api/documents/${id}/publish`, { method, headers }, env);
+
+    expect((await app.request(`/d/${id}`, {}, env)).status).toBe(404); // unpublished by default
+    expect((await publish('POST', stranger)).status).toBe(404); // cannot see it, cannot publish it
+    expect((await app.request(`/d/${id}`, {}, env)).status).toBe(404);
+
+    expect((await publish('POST', owner)).status).toBe(200);
+    expect((await app.request(`/d/${id}`, {}, env)).status).toBe(200);
+
+    expect((await publish('DELETE', stranger)).status).toBe(404); // a stranger cannot revoke either
+    expect((await publish('DELETE', owner)).status).toBe(200);
+    expect((await app.request(`/d/${id}`, {}, env)).status).toBe(404);
+  });
+});
+
+describe('organization-only links', () => {
+  it('need an organization document, and send anonymous visitors to sign in instead of showing the page', async () => {
+    const { getAuthHeaders, userIdFor } = await import('../helpers');
+    const email = 'orgowner@example.com';
+    const owner = { ...getAuthHeaders(email), 'Content-Type': 'application/json' };
+    const now = Math.floor(Date.now() / 1000);
+    const mk = async (orgId: string | null) => {
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO documents (id, user_id, org_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by)
+         VALUES (?, ?, ?, 'Doc', '', 'internal body', ?, ?, 'user', 'user')`
+      ).bind(id, await userIdFor(email), orgId, now, now).run();
+      return id;
+    };
+    const personal = await mk(null);
+    const inOrg = await mk('org-1');
+    const publish = (id: string) => app.request(`/api/documents/${id}/publish`, { method: 'POST', headers: owner, body: JSON.stringify({ visibility: 'org' }) }, env);
+
+    expect((await publish(personal)).status).toBe(400);
+    expect((await publish(inOrg)).status).toBe(200);
+
+    const anon = await app.request(`/d/${inOrg}`, { redirect: 'manual' }, env);
+    expect(anon.status).toBe(302);
+    expect(await anon.text()).not.toContain('internal body');
+  });
+});

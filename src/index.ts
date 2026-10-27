@@ -396,13 +396,14 @@ app.post('/join', async (c) => {
   }
 });
 
-// Public shareable document reader
+// Public shareable document reader. Only documents their owner has published (see routes/documents.ts) are served.
 app.get('/d/:id', async (c) => {
   const docId = c.req.param('id');
   const doc = await c.env.DB.prepare(
-    `SELECT d.id, d.title, d.markdown, d.created_at, d.updated_at, d.created_by, o.name as org_name
+    `SELECT d.id, d.title, d.markdown, d.created_at, d.updated_at, d.created_by, o.name as org_name, p.visibility as visibility
      FROM documents d
      LEFT JOIN organizations o ON o.id = d.org_id
+     JOIN published_documents p ON p.document_id = d.id
      WHERE d.id = ?`
   ).bind(docId).first<{
     id: string;
@@ -412,10 +413,19 @@ app.get('/d/:id', async (c) => {
     updated_at: number;
     created_by: string;
     org_name: string | null;
+    visibility: string;
   }>();
 
   if (!doc) {
     return c.text('Document not found', 404);
+  }
+
+  // Organization-only links: the viewer must sign in and already be able to read the document (owner, org member, share).
+  if (doc.visibility === 'org') {
+    const session = await readSession(c);
+    if (!session) return c.redirect(`/auth/kinde/login?return_to=${encodeURIComponent(`/d/${docId}`)}`);
+    const perm = await getDocumentPermission(c.env, docId, session.user_id, null);
+    if (!perm.canRead) return c.text('Document not found', 404);
   }
 
   return c.html(renderPublicDoc(doc));

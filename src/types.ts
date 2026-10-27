@@ -52,20 +52,23 @@ declare module 'hono' {
 }
 
 // Document schemas
+/** The mobile clients serialize unset optional fields as explicit nulls; treat null as "not provided". */
+const nullAsUndefined = (v: unknown) => (v === null ? undefined : v);
+
 export const createDocumentSchema = z.object({
   title: z.string().min(1).max(200),
-  markdown: z.string().optional().default(''),
+  markdown: z.preprocess(nullAsUndefined, z.string().optional().default('')),
   /** The writer's own instructions for working on this note (a per-note layer, see lib/writingGuidance.ts). */
-  guidance: z.string().max(2000).optional(),
-  guidanceMode: z.enum(['append', 'replace']).optional(),
+  guidance: z.preprocess(nullAsUndefined, z.string().max(2000).optional()),
+  guidanceMode: z.preprocess(nullAsUndefined, z.enum(['append', 'replace']).optional()),
   /** Instructions to attach for everyone who reads the note; readers adopt them before they apply. */
-  sharedGuidance: z.string().max(2000).optional(),
+  sharedGuidance: z.preprocess(nullAsUndefined, z.string().max(2000).optional()),
 });
 
 export const updateDocumentSchema = z.object({
-  title: z.string().min(1).max(200).optional(),
-  content: z.string().optional(),
-  markdown: z.string().optional(),
+  title: z.preprocess(nullAsUndefined, z.string().min(1).max(200).optional()),
+  content: z.preprocess(nullAsUndefined, z.string().optional()),
+  markdown: z.preprocess(nullAsUndefined, z.string().optional()),
 });
 
 // Claude interaction schemas

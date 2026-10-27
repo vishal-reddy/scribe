@@ -135,3 +135,18 @@ describe('organization-only links', () => {
     expect(await anon.text()).not.toContain('internal body');
   });
 });
+
+describe('clients that send null for unset optional fields', () => {
+  it('can create and edit a document (the mobile apps serialize unset fields as null)', async () => {
+    const { getAuthHeaders } = await import('../helpers');
+    const headers = { ...getAuthHeaders('nulls@example.com'), 'Content-Type': 'application/json' };
+    const created = await app.request('/api/documents', { method: 'POST', headers, body: JSON.stringify({ title: 'From the app', markdown: null }) }, env);
+    expect(created.status).toBe(201);
+    const id = ((await created.json()) as any).document.id;
+    const edited = await app.request(`/api/documents/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ title: null, markdown: 'new body' }) }, env);
+    expect(edited.status).toBe(200);
+    const read: any = await (await app.request(`/api/documents/${id}`, { headers }, env)).json();
+    expect(read.document.title).toBe('From the app');
+    expect(read.document.markdown).toBe('new body');
+  });
+});

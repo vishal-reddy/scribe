@@ -1,4 +1,5 @@
 import type { Env } from '../types';
+import { ensurePersonalOrgAccount, isOrgAdmin, implicitWorkspaceRole, listImplicitWorkspaces } from './orgAccounts';
 
 export function personalOrgId(userId: string): string {
   return `org_personal_${userId}`;
@@ -10,10 +11,11 @@ export function personalOrgId(userId: string): string {
 export async function ensurePersonalOrg(env: Env, userId: string): Promise<string> {
   const orgId = personalOrgId(userId);
   const now = Date.now();
+  const orgAccountId = await ensurePersonalOrgAccount(env, userId);
 
   await env.DB.prepare(
-    "INSERT OR IGNORE INTO organizations (id, name, is_personal, owner_user_id, created_at) VALUES (?, 'Personal', 1, ?, ?)"
-  ).bind(orgId, userId, now).run();
+    "INSERT OR IGNORE INTO organizations (id, name, is_personal, owner_user_id, org_id, created_at) VALUES (?, 'Personal', 1, ?, ?, ?)"
+  ).bind(orgId, userId, orgAccountId, now).run();
 
   await env.DB.prepare(
     "INSERT OR IGNORE INTO organization_members (org_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)"
@@ -42,11 +44,16 @@ export async function promoteSharedOrg(env: Env, orgId: string): Promise<void> {
   ).bind(name, orgId).run();
 }
 
+/**
+ * The caller's role in a workspace: an explicit membership, else the access its org grants (see implicitWorkspaceRole).
+ * (`orgId` here is a workspace id; the parameter keeps its older name.)
+ */
 export async function isMember(env: Env, orgId: string, userId: string): Promise<{ role: string } | null> {
   const row = await env.DB.prepare(
     "SELECT role FROM organization_members WHERE org_id = ? AND user_id = ?"
   ).bind(orgId, userId).first<{ role: string }>();
-  return row ?? null;
+  if (row) return row;
+  return implicitWorkspaceRole(env, orgId, userId);
 }
 
 export async function requireRole(env: Env, orgId: string, userId: string, roles: string[]): Promise<void> {
@@ -82,13 +89,19 @@ export async function resolveScope(
   return ensurePersonalOrg(env, userId);
 }
 
-export async function createOrganization(env: Env, userId: string, name: string): Promise<string> {
+/** Create a workspace. It goes in `parentOrgId` (the caller must be an owner/admin of that org), else in the caller's hidden personal org. */
+export async function createOrganization(env: Env, userId: string, name: string, parentOrgId?: string | null): Promise<string> {
   const orgId = `org_${crypto.randomUUID()}`;
   const now = Date.now();
+  let parent = await ensurePersonalOrgAccount(env, userId);
+  if (parentOrgId) {
+    if (!(await isOrgAdmin(env, parentOrgId, userId))) throw new Error("Forbidden: only org owners and admins can create workspaces in this org");
+    parent = parentOrgId;
+  }
 
   await env.DB.prepare(
-    "INSERT INTO organizations (id, name, is_personal, owner_user_id, created_at) VALUES (?, ?, 0, ?, ?)"
-  ).bind(orgId, name, userId, now).run();
+    "INSERT INTO organizations (id, name, is_personal, owner_user_id, org_id, created_at) VALUES (?, ?, 0, ?, ?, ?)"
+  ).bind(orgId, name, userId, parent, now).run();
 
   await env.DB.prepare(
     "INSERT INTO organization_members (org_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)"
@@ -101,26 +114,34 @@ export async function createOrganization(env: Env, userId: string, name: string)
   return orgId;
 }
 
+/** A workspace in the caller's list. orgAccountId is null for personal workspaces (the personal org is never shown). */
+export interface WorkspaceListItem { id: string; name: string; role: string; isPersonal: boolean; orgAccountId: string | null; visibility: string }
+
 export async function listOrganizationsForUser(
   env: Env,
   userId: string
-): Promise<Array<{ id: string; name: string; role: string; isPersonal: boolean }>> {
+): Promise<WorkspaceListItem[]> {
   await ensurePersonalOrg(env, userId);
 
   const { results } = await env.DB.prepare(
-    `SELECT o.id, o.name, om.role, o.is_personal as isPersonal
+    `SELECT o.id, o.name, om.role, o.is_personal as isPersonal, o.org_id as orgAccountId, o.visibility
      FROM organization_members om
      JOIN organizations o ON o.id = om.org_id
      WHERE om.user_id = ?
      ORDER BY o.is_personal DESC, o.created_at ASC`
-  ).bind(userId).all<{ id: string; name: string; role: string; isPersonal: number }>();
+  ).bind(userId).all<{ id: string; name: string; role: string; isPersonal: number; orgAccountId: string | null; visibility: string }>();
 
-  return results.map((r) => ({
+  const explicit: WorkspaceListItem[] = results.map((r) => ({
     id: r.id,
     name: r.name,
     role: r.role,
     isPersonal: r.isPersonal === 1,
+    orgAccountId: r.isPersonal === 1 ? null : r.orgAccountId,
+    visibility: r.visibility,
   }));
+  const seen = new Set(explicit.map((w) => w.id));
+  const implicit = (await listImplicitWorkspaces(env, userId)).filter((w) => !seen.has(w.id));
+  return [...explicit, ...implicit];
 }
 
 export async function switchActiveOrg(env: Env, userId: string, orgId: string): Promise<void> {

@@ -50,14 +50,13 @@ jobs:
 
       - run: npm ci
 
-      # Apply D1 database migrations to production
-      # Note: This step will be added when migrations are created
-      # - name: Run D1 Migrations
-      #   uses: cloudflare/wrangler-action@v3
-      #   with:
-      #     apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      #     command: d1 migrations apply scribe-db --remote
+      # Apply D1 migrations BEFORE deploying: the new code expects the new schema (a deploy without it breaks queries).
+      - name: Run D1 Migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply scribe-db --remote
 
       - name: Deploy
         uses: cloudflare/wrangler-action@v3

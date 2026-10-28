@@ -153,4 +153,31 @@ describe('orgs, workspaces and visibility', () => {
     await syncKindeOrgMembership(env, id, { orgCode: 'org_other' }); // signing in under another org never drops this one
     expect((await json(await call(who, 'GET', '/api/org-accounts'))).orgs.map((o: any) => o.id)).toEqual([org]);
   });
+
+  it('assigns a new person to specific workspaces when the org setting hides the rest', async () => {
+    const newcomer = 'org-newcomer@example.com';
+    await signUp(newcomer);
+    const org = (await json(await call(owner, 'POST', '/api/org-accounts', { name: 'Assign Co' }))).id as string;
+    expect((await call(owner, 'PATCH', `/api/org-accounts/${org}`, { workspaceVisibility: 'invite_only' })).status).toBe(200);
+    const wsA = (await json(await call(owner, 'POST', '/api/orgs', { name: 'Alpha', orgAccountId: org }))).id as string;
+    const wsB = (await json(await call(owner, 'POST', '/api/orgs', { name: 'Beta', orgAccountId: org }))).id as string;
+
+    // Added to the org and to Alpha only: invite-only hides Beta.
+    expect((await call(owner, 'POST', `/api/org-accounts/${org}/members`, { email: newcomer, role: 'member', workspaceIds: [wsA] })).status).toBe(201);
+    const seen = await workspaceIds(newcomer);
+    expect(seen).toContain(wsA);
+    expect(seen).not.toContain(wsB);
+
+    // A workspace from another org, a personal one, or an unknown id is refused and adds nobody.
+    const other = (await json(await call(owner, 'POST', '/api/org-accounts', { name: 'Other Co' }))).id as string;
+    const otherWs = (await json(await call(owner, 'POST', '/api/orgs', { name: 'Elsewhere', orgAccountId: other }))).id as string;
+    const late = 'org-late@example.com';
+    await signUp(late);
+    expect((await call(owner, 'POST', `/api/org-accounts/${org}/members`, { email: late, workspaceIds: [otherWs] })).status).toBe(404);
+    expect((await call(owner, 'POST', `/api/org-accounts/${org}/members`, { email: late, workspaceIds: ['nope'] })).status).toBe(404);
+    expect((await json(await call(owner, 'GET', `/api/org-accounts/${org}/members`))).members.some((m: any) => m.email === late)).toBe(false);
+
+    // Only org owners and admins may assign.
+    expect((await call(member, 'POST', `/api/org-accounts/${org}/members`, { email: late, workspaceIds: [wsA] })).status).toBe(403);
+  });
 });

@@ -53,10 +53,10 @@ orgAccounts.get('/:id/members', async (c) => {
   return c.json({ members: await listOrgAccountMembers(c.env, orgId) });
 });
 
-orgAccounts.post('/:id/members', zValidator('json', z.object({ email: z.string().email(), role: z.enum(['admin', 'member']).default('member') })), async (c) => {
+orgAccounts.post('/:id/members', zValidator('json', z.object({ email: z.string().email(), role: z.enum(['admin', 'member']).default('member'), workspaceIds: z.array(z.string().min(1)).max(100).optional() })), async (c) => {
   try {
-    const { email, role } = c.req.valid('json');
-    await addOrgAccountMember(c.env, c.req.param('id'), c.get('userId'), email, role);
+    const { email, role, workspaceIds } = c.req.valid('json');
+    await addOrgAccountMember(c.env, c.req.param('id'), c.get('userId'), email, role, workspaceIds ?? []);
     return c.json({ success: true }, 201);
   } catch (e) { return fail(c, e); }
 });

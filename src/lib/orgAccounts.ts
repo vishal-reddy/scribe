@@ -151,13 +151,31 @@ export async function listOrgAccountMembers(env: Env, orgId: string): Promise<Ar
 }
 
 /** Add an existing user to an org by email (owner/admin only). People who have never signed in can't be added yet. */
-export async function addOrgAccountMember(env: Env, orgId: string, requesterId: string, email: string, role: 'admin' | 'member'): Promise<void> {
+export async function addOrgAccountMember(
+  env: Env,
+  orgId: string,
+  requesterId: string,
+  email: string,
+  role: 'admin' | 'member',
+  workspaceIds: string[] = []
+): Promise<void> {
   if (!(await isOrgAdmin(env, orgId, requesterId))) throw new Error('Forbidden: only org owners and admins can add people');
   const user = await env.DB.prepare("SELECT id FROM users WHERE lower(email) = ?").bind(email.trim().toLowerCase()).first<{ id: string }>();
   if (!user) throw new Error('No Scribe account for that email yet. Ask them to sign in first.');
+  // Check every workspace first so a bad id doesn't leave the person half-added.
+  const targets = [...new Set(workspaceIds)];
+  for (const wsId of targets) {
+    const ws = await env.DB.prepare("SELECT org_id AS orgId, is_personal AS p FROM organizations WHERE id = ?").bind(wsId).first<{ orgId: string | null; p: number }>();
+    if (!ws || ws.p === 1 || ws.orgId !== orgId) throw new Error('Workspace not found in this organization');
+  }
+  const now = Date.now();
   await env.DB.prepare(
     "INSERT INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?) ON CONFLICT(org_id, user_id) DO UPDATE SET role = CASE WHEN org_members.role = 'owner' THEN 'owner' ELSE excluded.role END"
-  ).bind(orgId, user.id, role, Date.now()).run();
+  ).bind(orgId, user.id, role, now).run();
+  // Assign them to specific workspaces (needed when the org's setting doesn't show them everything). Existing roles are kept.
+  for (const wsId of targets) {
+    await env.DB.prepare("INSERT OR IGNORE INTO organization_members (org_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)").bind(wsId, user.id, now).run();
+  }
 }
 
 export async function removeOrgAccountMember(env: Env, orgId: string, requesterId: string, targetUserId: string): Promise<void> {

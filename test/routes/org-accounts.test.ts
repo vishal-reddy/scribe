@@ -140,6 +140,27 @@ describe('orgs, workspaces and visibility', () => {
     expect((await json(await call(owner, 'GET', '/api/org-accounts'))).orgs.map((o: any) => o.id)).toContain(other);
   });
 
+  it('links through the provider-neutral endpoint and keeps the legacy column in step', async () => {
+    const { org } = await makeOrgWithWorkspace();
+    expect((await call(admin, 'PUT', `/api/org-accounts/${org}/external`, { provider: 'kinde', externalId: 'org_neutral' })).status).toBe(403); // owner only
+    expect((await call(owner, 'PUT', `/api/org-accounts/${org}/external`, { provider: 'nope', externalId: 'x' })).status).toBe(400); // unknown provider
+    expect((await call(owner, 'PUT', `/api/org-accounts/${org}/external`, { provider: 'kinde', externalId: 'org_neutral' })).status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT external_provider p, external_id i, kinde_org_code k FROM orgs WHERE id = ?').bind(org).first<{ p: string; i: string; k: string }>();
+    expect(row).toEqual({ p: 'kinde', i: 'org_neutral', k: 'org_neutral' });
+    const listed = (await json(await call(owner, 'GET', '/api/org-accounts'))).orgs.find((o: any) => o.id === org);
+    expect(listed).toMatchObject({ externalProvider: 'kinde', externalId: 'org_neutral', kindeOrgCode: 'org_neutral' });
+
+    const stranger = 'neutral-signin@example.com';
+    await signUp(stranger);
+    await syncKindeOrgMembership(env, await userIdFor(stranger), { orgCode: 'org_neutral' }); // sync follows the new columns
+    expect((await json(await call(stranger, 'GET', '/api/org-accounts'))).orgs.map((o: any) => o.id)).toEqual([org]);
+
+    expect((await call(owner, 'PUT', `/api/org-accounts/${org}/external`, { provider: 'kinde', externalId: null })).status).toBe(200); // unlink
+    const cleared = await env.DB.prepare('SELECT external_provider p, external_id i, kinde_org_code k FROM orgs WHERE id = ?').bind(org).first();
+    expect(cleared).toEqual({ p: null, i: null, k: null });
+  });
+
   it('adds the org a user signed in under, without removing anything', async () => {
     const { org } = await makeOrgWithWorkspace();
     await call(owner, 'PUT', `/api/org-accounts/${org}/kinde`, { kindeOrgCode: 'org_signin' });

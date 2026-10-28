@@ -83,7 +83,10 @@ export interface OrgAccount {
   name: string;
   role: string;
   workspaceVisibility: WorkspaceVisibility;
+  /** Kept for existing clients: the Kinde org code when externalProvider is 'kinde'. */
   kindeOrgCode: string | null;
+  externalProvider: string | null;
+  externalId: string | null;
 }
 
 export async function createOrgAccount(env: Env, userId: string, name: string): Promise<string> {
@@ -97,12 +100,12 @@ export async function createOrgAccount(env: Env, userId: string, name: string): 
 /** The orgs the caller belongs to. The hidden personal org is never listed. */
 export async function listOrgAccountsForUser(env: Env, userId: string): Promise<OrgAccount[]> {
   const { results } = await env.DB.prepare(
-    `SELECT o.id, o.name, om.role, o.workspace_visibility AS workspaceVisibility, o.kinde_org_code AS kindeOrgCode
+    `SELECT o.id, o.name, om.role, o.workspace_visibility AS workspaceVisibility, o.external_id AS externalId, o.external_provider AS externalProvider
        FROM org_members om JOIN orgs o ON o.id = om.org_id
       WHERE om.user_id = ? AND o.is_personal = 0
       ORDER BY o.created_at ASC`
-  ).bind(userId).all<{ id: string; name: string; role: string; workspaceVisibility: string; kindeOrgCode: string | null }>();
-  return results.map((r) => ({ ...r, workspaceVisibility: effective(r.workspaceVisibility, 'invite_only') }));
+  ).bind(userId).all<{ id: string; name: string; role: string; workspaceVisibility: string; externalId: string | null; externalProvider: string | null }>();
+  return results.map((r) => ({ ...r, kindeOrgCode: r.externalProvider === 'kinde' ? r.externalId : null, workspaceVisibility: effective(r.workspaceVisibility, 'invite_only') }));
 }
 
 export async function updateOrgAccount(
@@ -194,7 +197,7 @@ export async function removeOrgAccountMember(env: Env, orgId: string, requesterI
  *    user to that linked org and never removes anyone, because one org says nothing about the others.
  */
 export async function syncKindeOrgMembership(env: Env, userId: string, claims: { orgCode?: string; orgCodes?: string[] }): Promise<void> {
-  const { results } = await env.DB.prepare("SELECT id, kinde_org_code AS code, owner_user_id AS owner FROM orgs WHERE kinde_org_code IS NOT NULL").all<{ id: string; code: string; owner: string }>();
+  const { results } = await env.DB.prepare("SELECT id, external_id AS code, owner_user_id AS owner FROM orgs WHERE external_provider = 'kinde' AND external_id IS NOT NULL").all<{ id: string; code: string; owner: string }>();
   const now = Date.now();
   for (const o of results) {
     const listed = claims.orgCodes ? claims.orgCodes.includes(o.code) : claims.orgCode === o.code;
@@ -206,9 +209,17 @@ export async function syncKindeOrgMembership(env: Env, userId: string, claims: {
   }
 }
 
-/** Link an org to a Kinde organization code (org owner only). */
-export async function linkOrgToKinde(env: Env, orgId: string, userId: string, kindeOrgCode: string | null): Promise<void> {
+/** Link an org to an external identity-provider organization (org owner only). Pass null to unlink. */
+export async function linkOrgToExternal(env: Env, orgId: string, userId: string, provider: string, externalId: string | null): Promise<void> {
   const role = await getOrgRole(env, orgId, userId);
-  if (role !== 'owner') throw new Error('Forbidden: only the org owner can link it to Kinde');
-  await env.DB.prepare("UPDATE orgs SET kinde_org_code = ? WHERE id = ? AND is_personal = 0").bind(kindeOrgCode, orgId).run();
+  if (role !== 'owner') throw new Error(`Forbidden: only the org owner can link it to ${provider}`);
+  const id = externalId ?? null;
+  // kinde_org_code is dual-written while the previous release may still be reading it.
+  await env.DB.prepare("UPDATE orgs SET external_provider = ?, external_id = ?, kinde_org_code = ? WHERE id = ? AND is_personal = 0")
+    .bind(id === null ? null : provider, id, provider === 'kinde' ? id : null, orgId).run();
+}
+
+/** Link an org to a Kinde organization code (org owner only). */
+export function linkOrgToKinde(env: Env, orgId: string, userId: string, kindeOrgCode: string | null): Promise<void> {
+  return linkOrgToExternal(env, orgId, userId, 'kinde', kindeOrgCode);
 }

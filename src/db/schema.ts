@@ -143,7 +143,9 @@ export const orgs = sqliteTable('orgs', {
   name: text('name').notNull(),
   isPersonal: integer('is_personal', { mode: 'boolean' }).notNull().default(false),
   ownerUserId: text('owner_user_id').notNull(),
-  kindeOrgCode: text('kinde_org_code'),
+  kindeOrgCode: text('kinde_org_code'), // legacy, dual-written; see 0015
+  externalProvider: text('external_provider'),
+  externalId: text('external_id'),
   workspaceVisibility: text('workspace_visibility').notNull().default('org_members'), // org_members | org_admins | invite_only
   createdAt: integer('created_at').notNull(),
 });

@@ -11,7 +11,7 @@ import {
   listOrgAccountMembers,
   addOrgAccountMember,
   removeOrgAccountMember,
-  linkOrgToKinde,
+  linkOrgToKinde, linkOrgToExternal,
   attachWorkspaceToOrg,
 } from '../lib/orgAccounts';
 
@@ -72,6 +72,15 @@ orgAccounts.delete('/:id/members/:userId', async (c) => {
 orgAccounts.put('/:id/kinde', zValidator('json', z.object({ kindeOrgCode: z.string().min(1).max(100).nullable() })), async (c) => {
   try {
     await linkOrgToKinde(c.env, c.req.param('id'), c.get('userId'), c.req.valid('json').kindeOrgCode);
+    return c.json({ success: true });
+  } catch (e) { return fail(c, e); }
+});
+
+// Provider-neutral form of the link above. Only 'kinde' is synced today.
+orgAccounts.put('/:id/external', zValidator('json', z.object({ provider: z.enum(['kinde']), externalId: z.string().min(1).max(100).nullable() })), async (c) => {
+  try {
+    const { provider, externalId } = c.req.valid('json');
+    await linkOrgToExternal(c.env, c.req.param('id'), c.get('userId'), provider, externalId);
     return c.json({ success: true });
   } catch (e) { return fail(c, e); }
 });

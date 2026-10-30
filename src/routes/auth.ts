@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../types';
 import { isLocalDev } from '../lib/env';
+import { timingSafeEqual } from '../middleware/auth';
 import type { D1Database } from '@cloudflare/workers-types';
 
 const auth = new Hono<{ Bindings: Env }>();
@@ -119,7 +120,7 @@ auth.post('/request-otp', zValidator('json', requestOtpSchema), async (c) => {
   try {
     const userId = await sha256(email);
     const otp = generateOTP();
-    const otpHash = await sha256(otp);
+    const otpHash = await sha256(`${email}:${otp}`); // bound to the email so identical codes never share a hash
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
 
@@ -239,8 +240,8 @@ auth.post('/verify-otp', zValidator('json', verifyOtpSchema), async (c) => {
     }
 
     // Verify OTP hash
-    const otpHash = await sha256(otp);
-    if (user.otpCode !== otpHash) {
+    const otpHash = await sha256(`${email}:${otp}`);
+    if (!user.otpCode || !(await timingSafeEqual(user.otpCode, otpHash))) {
       return c.json({ error: 'Invalid code' }, 401);
     }
 

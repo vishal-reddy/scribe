@@ -9,8 +9,11 @@ import { getDocumentPermission } from './documentShares';
  */
 export type LinkVisibility = 'public' | 'org' | 'shared';
 
+/** Omitted means public (what the apps' plain "publish" sends). Anything else must be a known value: never fail open. */
 export function parseVisibility(raw: unknown): LinkVisibility {
-  return raw === 'org' || raw === 'shared' ? raw : 'public';
+  if (raw === undefined || raw === null) return 'public';
+  if (raw === 'public' || raw === 'org' || raw === 'shared') return raw;
+  throw new PublishError("visibility must be 'public', 'org' or 'shared'", 400);
 }
 
 /** Links that make the viewer sign in and then check their normal read access. */

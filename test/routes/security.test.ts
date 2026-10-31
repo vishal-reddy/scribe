@@ -172,3 +172,23 @@ describe('people-with-access links', () => {
     expect(await anon.text()).not.toContain('private body');
   });
 });
+
+describe('publish visibility validation', () => {
+  it('rejects an unknown visibility instead of publishing publicly', async () => {
+    const { getAuthHeaders, userIdFor } = await import('../helpers');
+    const email = 'badvis@example.com';
+    const owner = { ...getAuthHeaders(email), 'Content-Type': 'application/json' };
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO documents (id, user_id, org_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, ?, NULL, 'Doc', '', 'body', ?, ?, 'user', 'user')`
+    ).bind(id, await userIdFor(email), now, now).run();
+    const post = (body: string) => app.request(`/api/documents/${id}/publish`, { method: 'POST', headers: owner, body }, env);
+
+    expect((await post(JSON.stringify({ visibility: 'privte' }))).status).toBe(400);
+    expect((await post(JSON.stringify({ visibility: '<script>' }))).status).toBe(400);
+    expect((await app.request(`/d/${id}`, {}, env)).status).toBe(404); // nothing got published
+    expect((await post(JSON.stringify({ visibility: 'public' }))).status).toBe(200);
+  });
+});

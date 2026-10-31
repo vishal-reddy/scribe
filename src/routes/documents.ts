@@ -635,8 +635,9 @@ documents.post('/:id/publish', async (c) => {
   const userId = c.get('userId');
   const body = await c.req.json<{ visibility?: string }>().catch(() => ({} as { visibility?: string }));
   try {
+    const visibility = parseVisibility(body.visibility);
     const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
-    return c.json(await publishDocument(c.env, documentId, userId, activeOrgId, parseVisibility(body.visibility)));
+    return c.json(await publishDocument(c.env, documentId, userId, activeOrgId, visibility));
   } catch (e) {
     if (e instanceof PublishError) return c.json({ error: e.message }, e.status);
     throw e;

@@ -16,6 +16,7 @@ import {
 } from "../services/classification";
 import { resolveScope, listOrganizationsForUser, switchActiveOrg, createOrganization } from "../lib/orgs";
 import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib/documentShares";
+import { publishDocument, unpublishDocument, PublishError } from "../lib/publishing";
 import { checkScribeQuota, reportScribeQuota } from "../lib/quota";
 
 import { cleanGuidanceText, effectiveGuidance, getGuidanceLayer, setAuthorGuidance, setGuidanceLayer, validateAuthorText } from "../lib/writingGuidance";
@@ -1171,6 +1172,65 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
           content: [{ type: "text" as const, text: `Error sharing document: ${err?.message || "Failed"}` }],
           isError: true,
         };
+      }
+    });
+
+    this.server.registerTool("publish_document", {
+      title: "Publish a Scribe document as a link",
+      description:
+        "Make a document readable at a link (https://scribe.kecker.co/d/<id>). Nothing is reachable by link until you call this. " +
+        "visibility 'shared' (default, safest): only signed-in people who already have access (you, your organization, or people you shared it with). " +
+        "'org': only members of the document's organization. 'public': anyone who has the link — use only when the user explicitly asks for a public link.",
+      inputSchema: {
+        documentId: z.string().describe("The ID of the document to publish"),
+        visibility: z.enum(["shared", "org", "public"]).default("shared").describe("Who can open the link"),
+      },
+      annotations: {
+        title: "Publish a Scribe document as a link",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    }, async ({ documentId, visibility }) => {
+      const userId = this.userId();
+      if (!userId) {
+        return { content: [{ type: "text" as const, text: "Error: Must be authenticated." }], isError: true };
+      }
+      try {
+        const activeOrgId = await resolveScope(this.env, userId);
+        const r = await publishDocument(this.env, documentId, userId, activeOrgId, visibility);
+        return { content: [{ type: "text" as const, text: `Published (${r.visibility}): https://scribe.kecker.co${r.url}` }] };
+      } catch (err: any) {
+        return { content: [{ type: "text" as const, text: `Error: ${err instanceof PublishError ? err.message : "Failed"}` }], isError: true };
+      }
+    });
+
+    this.server.registerTool("unpublish_document", {
+      title: "Stop sharing a Scribe document by link",
+      description:
+        "Revoke a document's /d/ link. Direct shares with specific people are not affected.",
+      inputSchema: {
+        documentId: z.string().describe("The ID of the document to unpublish"),
+      },
+      annotations: {
+        title: "Stop sharing a Scribe document by link",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    }, async ({ documentId }) => {
+      const userId = this.userId();
+      if (!userId) {
+        return { content: [{ type: "text" as const, text: "Error: Must be authenticated." }], isError: true };
+      }
+      try {
+        const activeOrgId = await resolveScope(this.env, userId);
+        await unpublishDocument(this.env, documentId, userId, activeOrgId);
+        return { content: [{ type: "text" as const, text: "Unpublished. The link no longer works." }] };
+      } catch (err: any) {
+        return { content: [{ type: "text" as const, text: `Error: ${err instanceof PublishError ? err.message : "Failed"}` }], isError: true };
       }
     });
 

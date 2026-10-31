@@ -4,6 +4,7 @@ import { verifyDevAutomationToken } from './lib/devAutomation';
 import { copyDocument } from './lib/guidanceCopy';
 import { renderGuidancePage, type GuidancePageData } from './web/guidancePage';
 import { getDocumentPermission } from './lib/documentShares';
+import { requiresSignIn } from './lib/publishing';
 import { resolveScope } from './lib/orgs';
 import {
   GUIDANCE_MAX_LENGTH,
@@ -421,8 +422,9 @@ app.get('/d/:id', async (c) => {
     return c.text('Document not found', 404);
   }
 
-  // Organization-only links: the viewer must sign in and already be able to read the document (owner, org member, share).
-  if (doc.visibility === 'org') {
+  // Organization-only and people-with-access links: the viewer must sign in and already be able to read the document
+  // (owner, org member, direct share).
+  if (requiresSignIn(doc.visibility)) {
     const session = await readSession(c);
     if (!session) return c.redirect(`/auth/kinde/login?return_to=${encodeURIComponent(`/d/${docId}`)}`);
     const perm = await getDocumentPermission(c.env, docId, session.user_id, null);

@@ -150,3 +150,25 @@ describe('clients that send null for unset optional fields', () => {
     expect(read.document.markdown).toBe('new body');
   });
 });
+
+describe('people-with-access links', () => {
+  it('works on a personal document and opens only for people who can already read it', async () => {
+    const { getAuthHeaders, userIdFor } = await import('../helpers');
+    const email = 'sharedlink@example.com';
+    const owner = { ...getAuthHeaders(email), 'Content-Type': 'application/json' };
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO documents (id, user_id, org_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, ?, NULL, 'Doc', '', 'private body', ?, ?, 'user', 'user')`
+    ).bind(id, await userIdFor(email), now, now).run();
+
+    const res = await app.request(`/api/documents/${id}/publish`, { method: 'POST', headers: owner, body: JSON.stringify({ visibility: 'shared' }) }, env);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).visibility).toBe('shared');
+
+    const anon = await app.request(`/d/${id}`, { redirect: 'manual' }, env);
+    expect(anon.status).toBe(302); // must sign in first
+    expect(await anon.text()).not.toContain('private body');
+  });
+});

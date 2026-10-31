@@ -15,6 +15,7 @@ import {
   removeDocumentShare,
   listDocumentShares,
 } from '../lib/documentShares';
+import { publishDocument, unpublishDocument, parseVisibility, PublishError } from '../lib/publishing';
 import {
   reparseDocument, rebindLinksToTitle, moveDocument, getBacklinks, getOutgoingLinks,
   addManualLink, removeLink, addTag, removeTag, NotFoundError,
@@ -608,7 +609,7 @@ documents.post('/:id/persist', async (c) => {
 });
 
 /**
- * Publish / unpublish a document as a public read-only page at /d/:id.
+ * Publish / unpublish a document as a read-only page at /d/:id (public, organization-only, or people-with-access).
  * POST /api/documents/:id/publish, DELETE /api/documents/:id/publish, GET /api/documents/:id/publish.
  * Only the owner (or an org admin) can change it. Nothing is public until this is called.
  */
@@ -631,27 +632,27 @@ documents.get('/:id/publish', async (c) => {
 
 documents.post('/:id/publish', async (c) => {
   const documentId = c.req.param('id');
-  const denied = await publishAccess(c, documentId);
-  if (denied) return denied;
+  const userId = c.get('userId');
   const body = await c.req.json<{ visibility?: string }>().catch(() => ({} as { visibility?: string }));
-  const visibility = body.visibility === 'org' ? 'org' : 'public';
-  if (visibility === 'org') {
-    const doc = await c.env.DB.prepare('SELECT org_id FROM documents WHERE id = ?').bind(documentId).first<{ org_id: string | null }>();
-    if (!doc?.org_id) return c.json({ error: 'Organization-only links need a document in an organization workspace' }, 400);
+  try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    return c.json(await publishDocument(c.env, documentId, userId, activeOrgId, parseVisibility(body.visibility)));
+  } catch (e) {
+    if (e instanceof PublishError) return c.json({ error: e.message }, e.status);
+    throw e;
   }
-  await c.env.DB.prepare(
-    `INSERT INTO published_documents (document_id, published_by, published_at, visibility) VALUES (?, ?, ?, ?)
-     ON CONFLICT(document_id) DO UPDATE SET visibility = excluded.visibility`
-  ).bind(documentId, c.get('userId'), Math.floor(Date.now() / 1000), visibility).run();
-  return c.json({ published: true, visibility, url: `/d/${documentId}` });
 });
 
 documents.delete('/:id/publish', async (c) => {
   const documentId = c.req.param('id');
-  const denied = await publishAccess(c, documentId);
-  if (denied) return denied;
-  await c.env.DB.prepare('DELETE FROM published_documents WHERE document_id = ?').bind(documentId).run();
-  return c.json({ published: false, url: null });
+  const userId = c.get('userId');
+  try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    return c.json(await unpublishDocument(c.env, documentId, userId, activeOrgId));
+  } catch (e) {
+    if (e instanceof PublishError) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
 });
 
 /**

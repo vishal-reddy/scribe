@@ -1,4 +1,6 @@
-import { GUIDANCE_MAX_LENGTH, type AuthorGuidanceView } from '../lib/writingGuidance';
+import { GUIDANCE_ATTACHMENT_LIMIT, GUIDANCE_MAX_LENGTH, type AuthorGuidanceView, type GuidanceAttachment } from '../lib/writingGuidance';
+
+type PageAttachment = Omit<GuidanceAttachment, 'text'>;
 
 const esc = (s: string) =>
   s.replace(/[&<>'"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[ch] || ch);
@@ -7,11 +9,13 @@ export interface GuidancePageData {
   email: string;
   defaultText: string | null;
   userLayer: { text: string; mode: 'append' | 'replace' } | null;
+  userAttachments: PageAttachment[];
   documents: { id: string; title: string }[];
   selected: {
     id: string;
     title: string;
     layer: { text: string; mode: 'append' | 'replace' } | null;
+    attachments: PageAttachment[];
     author: AuthorGuidanceView | null;
     isOwner: boolean;
     isTemplate: boolean;
@@ -19,6 +23,43 @@ export interface GuidancePageData {
   effective: string;
   notice: string | null;
   error: string | null;
+}
+
+
+const ATTACHMENT_STATUS: Record<string, string> = {
+  unavailable: 'unavailable (deleted, or no longer shared with you), so it is not used',
+  blocked: 'not used: it asks the assistant to hide something from you',
+};
+
+/** The notes used as guidance for one scope, with a way to remove each and to add another. `docId` is '' for all notes. */
+function attachmentsBlock(docId: string, attached: PageAttachment[], documents: { id: string; title: string }[]) {
+  const target = docId ? 'doc' : 'all';
+  const hidden = `<input type="hidden" name="target" value="${target}">${docId ? `<input type="hidden" name="doc" value="${esc(docId)}">` : ''}`;
+  const taken = new Set([...attached.map((a) => a.documentId), docId]);
+  const options = documents
+    .filter((x) => !taken.has(x.id))
+    .map((x) => `<option value="${esc(x.id)}">${esc(x.title || 'Untitled')}</option>`)
+    .join('');
+  const rows = attached
+    .map((a) => {
+      const note = [a.shared ? 'shared with you' : '', a.shortened ? 'long, so only the start is used' : '', ATTACHMENT_STATUS[a.status] ?? ''].filter(Boolean).join(', ');
+      return `<li><span>${esc(a.title || 'A note you can no longer open')}${note ? ` <span class="hint">(${esc(note)})</span>` : ''}</span>
+        <form method="post" action="/guidance" class="inline">${hidden}<input type="hidden" name="action" value="detach_note"><input type="hidden" name="source" value="${esc(a.documentId)}"><button aria-label="Stop using ${esc(a.title || 'this note')} as guidance">Remove</button></form></li>`;
+    })
+    .join('');
+  const add =
+    attached.length >= GUIDANCE_ATTACHMENT_LIMIT
+      ? `<p class="hint">You can use up to ${GUIDANCE_ATTACHMENT_LIMIT} notes here. Remove one to add another.</p>`
+      : options
+        ? `<form method="post" action="/guidance">${hidden}<input type="hidden" name="action" value="attach_note">
+            <label for="attach-${target}">Use another note as guidance</label>
+            <select id="attach-${target}" name="source"><option value="">Choose a note…</option>${options}</select> <button>Use this note</button>
+          </form>`
+        : '';
+  return `<h3>Notes used as guidance</h3>
+    <p class="hint">The assistant reads these notes each time, so editing one changes the guidance.</p>
+    ${rows ? `<ul class="attached">${rows}</ul>` : '<p class="hint">None yet.</p>'}
+    ${add}`;
 }
 
 function modeRadios(name: string, mode: 'append' | 'replace') {
@@ -87,7 +128,8 @@ export function renderGuidancePage(d: GuidancePageData): string {
   pre{white-space:pre-wrap;background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:12px;font:13px/1.5 ui-monospace,monospace}
   .notice{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:8px 12px} .error{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 12px}
   details{margin:.8em 0} fieldset.modes{border:0;padding:0;margin:8px 0} fieldset.modes legend{font-size:14px;color:#5c5c66;padding:0}
-  label[for=doc-pick]{display:block;font-weight:600;margin-bottom:4px}
+  label[for=doc-pick],label[for^=attach-]{display:block;font-weight:600;margin-bottom:4px}
+  ul.attached{list-style:none;padding:0;margin:.4em 0} ul.attached li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid #e4e4e7} ul.attached form{margin:0} ul.attached button{margin:0;padding:5px 12px}
   a:focus-visible,button:focus-visible,textarea:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #2563eb;outline-offset:2px}
   @media (prefers-color-scheme:dark){body{background:#121214;color:#f4f4f5} a{color:#d4d4d8} textarea,select,pre{background:#1c1c1f;color:#f4f4f5;border-color:#3f3f46} button{background:#e4e4e7;color:#18181b} .hint,fieldset.modes legend{color:#a1a1aa} .notice{background:#052e1f;border-color:#065f46} .error{background:#3b0d0d;border-color:#7f1d1d}}
 </style></head><body>
@@ -106,6 +148,7 @@ export function renderGuidancePage(d: GuidancePageData): string {
   ${modeRadios('mode', d.userLayer?.mode ?? 'append')}
   <button>Save</button> <span class="hint">Leave empty to go back to the defaults.</span>
 </form>
+${attachmentsBlock('', d.userAttachments, d.documents)}
 
 <h2>One note</h2>
 <form method="get" action="/guidance"><label for="doc-pick">Note</label><select id="doc-pick" name="doc"><option value="">Choose a note…</option>${docOptions}</select> <button>Open</button></form>
@@ -117,7 +160,7 @@ ${
         <textarea name="text" aria-label="Your guidance for this note" maxlength="${GUIDANCE_MAX_LENGTH}" rows="4">${esc(s.layer?.text ?? '')}</textarea>
         ${modeRadios('mode', s.layer?.mode ?? 'append')}
         <button>Save for this note</button>
-      </form>${authorBlock}`
+      </form>${attachmentsBlock(s.id, s.attachments, d.documents)}${authorBlock}`
     : ''
 }
 

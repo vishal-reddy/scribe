@@ -1,4 +1,6 @@
 import type { Env } from '../types';
+import { getDocumentPermission } from './documentShares';
+import { resolveScope } from './orgs';
 import { WRITER_GUIDANCE, lintGuidance, resolveGuidance, writingGuidanceEnabled } from '../mcp/writingGuidance';
 
 import type { GuidanceLayer, GuidanceMode } from '../mcp/writingGuidance';
@@ -162,9 +164,116 @@ export async function authorGuidanceFor(env: Env, userId: string, documentId: st
 
 export type AuthorGuidanceView = NonNullable<Awaited<ReturnType<typeof authorGuidanceFor>>>;
 
+// ── Attached notes (another note used as guidance) ──────────────────────────────────────────────────────────────
+
+export const GUIDANCE_ATTACHMENT_LIMIT = 3;
+/** How much of one attached note the assistant is shown. Longer notes are cut, and the writer is told. */
+export const GUIDANCE_ATTACHMENT_MAX_CHARS = 4000;
+
+export type AttachmentStatus = 'ok' | 'unavailable' | 'blocked';
+
+export interface GuidanceAttachment {
+  documentId: string;
+  title: string;
+  status: AttachmentStatus;
+  /** Why a note is blocked: the same transparency lint every shared instruction passes. */
+  problems?: string[];
+  /** The note was longer than GUIDANCE_ATTACHMENT_MAX_CHARS. */
+  shortened?: boolean;
+  /** The note belongs to someone else and was shared with the writer. */
+  shared?: boolean;
+  /** What the assistant is told. Server side only: never sent to clients. */
+  text?: string;
+}
+
+/**
+ * The notes a writer attached for a scope ('' = all notes). Each is read live, and only if the writer can still read it:
+ * a deleted note, or one that is no longer shared with them, is 'unavailable' and contributes nothing. A note whose text
+ * fails the lint is 'blocked', so editing a shared note can't smuggle hidden instructions into someone's assistant.
+ */
+export async function loadGuidanceAttachments(env: Env, userId: string, scopeDocumentId = ''): Promise<GuidanceAttachment[]> {
+  if (!userId) return [];
+  const rows = await env.DB.prepare(
+    'SELECT source_document_id AS id FROM guidance_attachments WHERE user_id = ? AND document_id = ? ORDER BY created_at, source_document_id'
+  ).bind(userId, scopeDocumentId).all<{ id: string }>();
+  const ids = (rows.results ?? []).map((r) => r.id);
+  if (!ids.length) return [];
+  const activeOrgId = await resolveScope(env, userId);
+  const out: GuidanceAttachment[] = [];
+  for (const id of ids) {
+    const perm = await getDocumentPermission(env, id, userId, activeOrgId);
+    const doc = perm.canRead
+      ? await env.DB.prepare('SELECT title, markdown FROM documents WHERE id = ?').bind(id).first<{ title: string; markdown: string }>()
+      : null;
+    if (!doc) {
+      out.push({ documentId: id, title: '', status: 'unavailable' });
+      continue;
+    }
+    // eslint-disable-next-line no-control-regex
+    const full = (doc.markdown ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim();
+    const problems = lintGuidance(`${doc.title}\n${full}`);
+    if (problems.length) {
+      out.push({ documentId: id, title: doc.title, status: 'blocked', problems, shared: !perm.isOwner });
+      continue;
+    }
+    const shortened = full.length > GUIDANCE_ATTACHMENT_MAX_CHARS;
+    out.push({
+      documentId: id,
+      title: doc.title,
+      status: full ? 'ok' : 'unavailable',
+      shortened,
+      shared: !perm.isOwner,
+      text: shortened ? `${full.slice(0, GUIDANCE_ATTACHMENT_MAX_CHARS)}\n[The rest of this note is not included.]` : full,
+    });
+  }
+  return out;
+}
+
+/** What clients see: everything except the note's text. */
+export function publicAttachment(a: GuidanceAttachment): Omit<GuidanceAttachment, 'text'> {
+  const { text: _text, ...rest } = a;
+  return rest;
+}
+
+export type AttachResult = 'ok' | 'self' | 'limit' | 'not_found';
+
+/** Attach `sourceId` to a scope. The writer must be able to read the source. A note can't be attached to itself. */
+export async function attachGuidanceNote(env: Env, userId: string, scopeDocumentId: string, sourceId: string): Promise<AttachResult> {
+  const perm = await getDocumentPermission(env, sourceId, userId, await resolveScope(env, userId));
+  if (!perm.canRead) return 'not_found';
+  if (sourceId === scopeDocumentId) return 'self';
+  const existing = await env.DB.prepare(
+    'SELECT source_document_id AS id FROM guidance_attachments WHERE user_id = ? AND document_id = ?'
+  ).bind(userId, scopeDocumentId).all<{ id: string }>();
+  const ids = (existing.results ?? []).map((r) => r.id);
+  if (!ids.includes(sourceId) && ids.length >= GUIDANCE_ATTACHMENT_LIMIT) return 'limit';
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO guidance_attachments (user_id, document_id, source_document_id, created_at) VALUES (?, ?, ?, ?)'
+  ).bind(userId, scopeDocumentId, sourceId, Date.now()).run();
+  return 'ok';
+}
+
+export async function detachGuidanceNote(env: Env, userId: string, scopeDocumentId: string, sourceId: string): Promise<void> {
+  await env.DB.prepare('DELETE FROM guidance_attachments WHERE user_id = ? AND document_id = ? AND source_document_id = ?')
+    .bind(userId, scopeDocumentId, sourceId).run();
+}
+
+/** The writer's layer plus their attached notes, as one layer. Attached notes follow the layer's own text, in the order attached. */
+function withAttachments(layer: GuidanceLayer | null, attached: GuidanceAttachment[]): GuidanceLayer | null {
+  const parts = layer?.text ? [layer.text] : [];
+  for (const a of attached) {
+    if (a.status !== 'ok' || !a.text) continue;
+    const from = a.shared ? `From the note "${a.title}", shared with the writer:` : `From the writer's note "${a.title}":`;
+    parts.push(`${from}\n${a.text}`);
+  }
+  return parts.length ? { text: parts.join('\n\n'), mode: layer?.mode ?? 'append' } : null;
+}
+
 export async function effectiveGuidance(env: Env, userId: string, documentId?: string | null): Promise<EffectiveGuidance> {
-  const user = userId ? await getGuidanceLayer(env, userId) : null;
-  const doc = userId && documentId ? await getGuidanceLayer(env, userId, documentId) : null;
+  const userLayer = userId ? await getGuidanceLayer(env, userId) : null;
+  const docLayer = userId && documentId ? await getGuidanceLayer(env, userId, documentId) : null;
+  const user = withAttachments(userLayer, await loadGuidanceAttachments(env, userId));
+  const doc = documentId ? withAttachments(docLayer, await loadGuidanceAttachments(env, userId, documentId)) : docLayer;
   const author = userId && documentId ? await authorGuidanceFor(env, userId, documentId) : null;
   const inEffect = author?.adopted ? { text: author.text, authorName: author.authorName } : null;
   return resolveGuidance(defaultGuidance(env), user, doc, inEffect);

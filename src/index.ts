@@ -7,9 +7,14 @@ import { getDocumentPermission } from './lib/documentShares';
 import { requiresSignIn } from './lib/publishing';
 import { resolveScope } from './lib/orgs';
 import {
+  GUIDANCE_ATTACHMENT_LIMIT,
   GUIDANCE_MAX_LENGTH,
   LockedGuidanceError,
+  attachGuidanceNote,
   authorGuidanceFor,
+  detachGuidanceNote,
+  loadGuidanceAttachments,
+  publicAttachment,
   isTemplate,
   setTemplate,
   cleanGuidanceText,
@@ -252,6 +257,7 @@ async function guidanceView(c: Context<{ Bindings: Env }>, userId: string, email
         id: doc.id,
         title: doc.title,
         layer: await getGuidanceLayer(c.env, userId, doc.id),
+        attachments: (await loadGuidanceAttachments(c.env, userId, doc.id)).map(publicAttachment),
         author: await authorGuidanceFor(c.env, userId, doc.id),
         isOwner: doc.userId === userId,
         isTemplate: await isTemplate(c.env, doc.id),
@@ -262,6 +268,7 @@ async function guidanceView(c: Context<{ Bindings: Env }>, userId: string, email
     email,
     defaultText: defaultGuidance(c.env),
     userLayer: await getGuidanceLayer(c.env, userId),
+    userAttachments: (await loadGuidanceAttachments(c.env, userId)).map(publicAttachment),
     documents: rows.results ?? [],
     selected,
     effective: (await effectiveGuidance(c.env, userId, selected?.id)).text,
@@ -307,6 +314,23 @@ app.post('/guidance', async (c) => {
       const text = cleanGuidanceText(body.text ?? '');
       if (text === null || !mode) return fail(`Guidance can be up to ${GUIDANCE_MAX_LENGTH} characters.`);
       await setGuidanceLayer(c.env, userId, '', text, mode);
+      return back('ok')!;
+    }
+    case 'attach_note':
+    case 'detach_note': {
+      const scope = body.target === 'doc' ? docId : '';
+      if (scope === null) return fail('Choose a note first.');
+      const source = (body.source || '').trim();
+      if (!source) return fail('Choose a note to use.');
+      if (scope && !(await getDocumentPermission(c.env, scope, userId, await resolveScope(c.env, userId))).canRead) return fail('That note was not found.');
+      if (body.action === 'detach_note') {
+        await detachGuidanceNote(c.env, userId, scope, source);
+      } else {
+        const result = await attachGuidanceNote(c.env, userId, scope, source);
+        if (result === 'not_found') return fail('That note was not found.');
+        if (result === 'self') return fail("A note can't be its own guidance.");
+        if (result === 'limit') return fail(`You can use up to ${GUIDANCE_ATTACHMENT_LIMIT} notes here. Remove one first.`);
+      }
       return back('ok')!;
     }
     case 'save_doc':

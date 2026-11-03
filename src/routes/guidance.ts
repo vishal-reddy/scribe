@@ -5,8 +5,13 @@ import { copyDocument } from '../lib/guidanceCopy';
 import { getDocumentPermission } from '../lib/documentShares';
 import { resolveScope } from '../lib/orgs';
 import {
+  GUIDANCE_ATTACHMENT_LIMIT,
   GUIDANCE_MAX_LENGTH,
   LockedGuidanceError,
+  attachGuidanceNote,
+  detachGuidanceNote,
+  loadGuidanceAttachments,
+  publicAttachment,
   authorGuidanceFor,
   isTemplate,
   setTemplate,
@@ -28,6 +33,10 @@ import {
  *   GET/PUT /api/guidance                    all of the user's notes
  *   GET/PUT /api/guidance/documents/:id      one note
  *   GET     /api/guidance/effective?documentId=   what the assistant will be told
+ *   POST    /api/guidance/attachments                    { sourceDocumentId }  use another note as guidance for all notes
+ *   DELETE  /api/guidance/attachments/:sourceId
+ *   POST    /api/guidance/documents/:id/attachments      same, for one note
+ *   DELETE  /api/guidance/documents/:id/attachments/:sourceId
  */
 const guidance = new Hono<{ Bindings: Env }>();
 
@@ -50,6 +59,8 @@ guidance.get('/', async (c) => {
   return c.json({
     defaultText: defaultGuidance(c.env),
     layer: await getGuidanceLayer(c.env, userId),
+    attachments: (await loadGuidanceAttachments(c.env, userId)).map(publicAttachment),
+    attachmentLimit: GUIDANCE_ATTACHMENT_LIMIT,
     maxLength: GUIDANCE_MAX_LENGTH,
   });
 });
@@ -66,6 +77,8 @@ guidance.get('/documents/:id', async (c) => {
   if (!(await canReadDocument(c, userId, id))) return c.json({ error: 'Document not found' }, 404);
   return c.json({
     layer: await getGuidanceLayer(c.env, userId, id),
+    attachments: (await loadGuidanceAttachments(c.env, userId, id)).map(publicAttachment),
+    attachmentLimit: GUIDANCE_ATTACHMENT_LIMIT,
     author: await authorGuidanceFor(c.env, userId, id),
     isTemplate: await isTemplate(c.env, id),
     // Strictly the owner: unowned legacy notes belong to nobody, so nobody can publish instructions for readers on them.
@@ -164,6 +177,35 @@ guidance.put('/documents/:id', async (c) => {
   const result = await save(c.env, userId, id, await c.req.json().catch(() => ({})));
   if ('error' in result) return c.json(result, 400);
   return c.json({ layer: await getGuidanceLayer(c.env, userId, id) });
+});
+
+/** Shared by the all-notes and per-note routes. `scope` is '' for all notes, otherwise the note being guided. */
+async function attach(c: any, scope: string) {
+  const userId = c.get('userId');
+  const body = (await c.req.json().catch(() => ({}))) as { sourceDocumentId?: unknown };
+  if (typeof body.sourceDocumentId !== 'string' || !body.sourceDocumentId) return c.json({ error: 'sourceDocumentId is required' }, 400);
+  const result = await attachGuidanceNote(c.env, userId, scope, body.sourceDocumentId);
+  if (result === 'not_found') return c.json({ error: 'Document not found' }, 404);
+  if (result === 'self') return c.json({ error: "A note can't be its own guidance" }, 400);
+  if (result === 'limit') return c.json({ error: `You can attach up to ${GUIDANCE_ATTACHMENT_LIMIT} notes here. Remove one first`, limit: GUIDANCE_ATTACHMENT_LIMIT }, 409);
+  return c.json({ attachments: (await loadGuidanceAttachments(c.env, userId, scope)).map(publicAttachment) }, 201);
+}
+
+async function detach(c: any, scope: string) {
+  const userId = c.get('userId');
+  await detachGuidanceNote(c.env, userId, scope, c.req.param('sourceId'));
+  return c.json({ attachments: (await loadGuidanceAttachments(c.env, userId, scope)).map(publicAttachment) });
+}
+
+guidance.post('/attachments', (c) => attach(c, ''));
+guidance.delete('/attachments/:sourceId', (c) => detach(c, ''));
+guidance.post('/documents/:id/attachments', async (c) => {
+  if (!(await canReadDocument(c, c.get('userId'), c.req.param('id')))) return c.json({ error: 'Document not found' }, 404);
+  return attach(c, c.req.param('id'));
+});
+guidance.delete('/documents/:id/attachments/:sourceId', async (c) => {
+  if (!(await canReadDocument(c, c.get('userId'), c.req.param('id')))) return c.json({ error: 'Document not found' }, 404);
+  return detach(c, c.req.param('id'));
 });
 
 guidance.get('/effective', async (c) => {

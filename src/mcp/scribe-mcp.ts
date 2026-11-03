@@ -19,7 +19,7 @@ import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib
 import { publishDocument, unpublishDocument, PublishError } from "../lib/publishing";
 import { checkScribeQuota, reportScribeQuota } from "../lib/quota";
 
-import { cleanGuidanceText, effectiveGuidance, getGuidanceLayer, setAuthorGuidance, setGuidanceLayer, validateAuthorText } from "../lib/writingGuidance";
+import { GUIDANCE_ATTACHMENT_LIMIT, attachGuidanceNote, cleanGuidanceText, detachGuidanceNote, effectiveGuidance, getGuidanceLayer, loadGuidanceAttachments, setAuthorGuidance, setGuidanceLayer, validateAuthorText } from "../lib/writingGuidance";
 import {
   EDIT_FOR_LEARNING_NOTE,
   PRESERVE_VOICE_NOTE,
@@ -424,6 +424,54 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
               : "The writer has turned Scribe's writing guidance off. Help with the task as asked.",
           },
         ],
+      };
+    });
+
+    this.server.registerTool("set_guidance_note", {
+      title: "Use a note as the writer's guidance",
+      description:
+        "Attach one of the writer's notes (a style guide, a rubric, a glossary) as guidance for their assistant, " +
+        "or remove it. Pass guidedDocumentId to apply it to one note, or leave it out to apply it to all of the " +
+        `writer's notes. Up to ${GUIDANCE_ATTACHMENT_LIMIT} notes per scope. The attached note is read each time, ` +
+        "so editing it changes the guidance. Only do this when the writer asks for it.",
+      inputSchema: {
+        sourceDocumentId: z.string().describe("The note to use as guidance"),
+        guidedDocumentId: z.string().optional().describe("The note it guides. Omit for all of the writer's notes"),
+        attach: z.boolean().default(true).describe("true to attach, false to remove"),
+      },
+      annotations: {
+        title: "Use a note as the writer's guidance",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    }, async ({ sourceDocumentId, guidedDocumentId, attach }) => {
+      const userId = this.userId();
+      const fail = (text: string) => ({ content: [{ type: "text" as const, text: `Error: ${text}` }], isError: true });
+      if (!userId) return fail("Sign in to change guidance");
+      const scope = guidedDocumentId ?? "";
+      if (scope) {
+        const perm = await getDocumentPermission(this.env, scope, userId, await resolveScope(this.env, userId));
+        if (!perm.canRead) return fail(`Document with ID ${scope} not found`);
+      }
+      if (!attach) {
+        await detachGuidanceNote(this.env, userId, scope, sourceDocumentId);
+      } else {
+        const result = await attachGuidanceNote(this.env, userId, scope, sourceDocumentId);
+        if (result === "not_found") return fail(`Document with ID ${sourceDocumentId} not found`);
+        if (result === "self") return fail("A note can't be its own guidance");
+        if (result === "limit") return fail(`Up to ${GUIDANCE_ATTACHMENT_LIMIT} notes can be attached here. Remove one first`);
+      }
+      const now = await loadGuidanceAttachments(this.env, userId, scope);
+      const list = now.length
+        ? now.map((a) => `- ${a.title || a.documentId}${a.status === "ok" ? "" : ` (${a.status})`}`).join("\n")
+        : "(none)";
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Notes used as guidance for ${scope ? "this note" : "all of the writer's notes"}:\n${list}`,
+        }],
       };
     });
 

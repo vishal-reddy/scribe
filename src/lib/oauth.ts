@@ -55,13 +55,23 @@ export function b64url(bytes: Uint8Array): string {
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+const DISALLOWED_REDIRECT_PROTOCOLS = new Set([
+  'http:',
+  'javascript:',
+  'data:',
+  'vbscript:',
+  'file:',
+  'blob:',
+  'about:',
+]);
+
 export function isValidRedirectUri(uri: string): boolean {
   try {
     const u = new URL(uri);
     if (u.protocol === 'https:') return true;
     if (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return true;
-    if (u.protocol !== 'http:' && u.protocol !== 'https:' && u.protocol.length > 1) return true;
-    return false;
+    if (DISALLOWED_REDIRECT_PROTOCOLS.has(u.protocol)) return false;
+    return /^[a-z][a-z0-9+.-]*:$/.test(u.protocol);
   } catch {
     return false;
   }

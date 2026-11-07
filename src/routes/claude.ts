@@ -116,7 +116,7 @@ claude.get('/artifacts/:id', async (c) => {
     }
 
     // Ownership check
-    if (doc.userId && doc.userId !== userId) {
+    if (!doc.userId || doc.userId !== userId) {
       return c.json({ error: 'Artifact not found' }, 404);
     }
 
@@ -219,7 +219,7 @@ claude.post('/edit/:id', zValidator('json', claudeEditDocumentSchema), async (c)
     }
 
     // Ownership check
-    if (doc.userId && doc.userId !== userId) {
+    if (!doc.userId || doc.userId !== userId) {
       return c.json({ error: 'Artifact not found' }, 404);
     }
 
@@ -321,7 +321,7 @@ claude.post('/prompt', zValidator('json', claudePromptSchema), async (c) => {
       }
 
       // Ownership check
-      if (doc.userId && doc.userId !== userId) {
+      if (!doc.userId || doc.userId !== userId) {
         return c.json({ error: 'Document not found' }, 404);
       }
 
@@ -412,7 +412,7 @@ claude.get('/history/:documentId', async (c) => {
   try {
     // Verify document ownership
     const doc = await db.select().from(schema.documents).where(eq(schema.documents.id, documentId)).get();
-    if (doc && doc.userId && doc.userId !== userId) {
+    if (doc && (!doc.userId || doc.userId !== userId)) {
       return c.json({ error: 'Document not found' }, 404);
     }
 

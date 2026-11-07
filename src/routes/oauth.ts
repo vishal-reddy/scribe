@@ -172,6 +172,14 @@ oauthRoute.get('/authorize', async (c) => {
 oauthRoute.post('/authorize', async (c) => {
   const session = await readSession(c);
   if (!session) return c.redirect('/auth/kinde/login', 302);
+  const origin = c.req.header('Origin');
+  if (origin) {
+    try {
+      if (new URL(origin).host !== new URL(c.req.url).host) return c.text('Forbidden', 403);
+    } catch {
+      return c.text('Forbidden', 403);
+    }
+  }
   const form = await c.req.parseBody();
   const decision = String(form.decision ?? '');
   const clientId = String(form.client_id ?? '');
@@ -186,6 +194,8 @@ oauthRoute.post('/authorize', async (c) => {
   if (!client) return c.text('Unknown client_id', 400);
   const registered = parseRedirectUris(client.redirect_uris_json);
   if (!registered.includes(redirectUri)) return c.text('redirect_uri does not match', 400);
+  if (!codeChallenge || codeChallengeMethod !== 'S256')
+    return redirectWithError(redirectUri, state, 'invalid_request', 'PKCE S256 required');
   if (decision !== 'approve') return redirectWithError(redirectUri, state, 'access_denied');
 
   const code = randomToken('ac');

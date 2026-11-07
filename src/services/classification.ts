@@ -147,7 +147,7 @@ export const TAXONOMY_GUIDANCE =
 /** Exported for reuse by scribe-mcp.ts's tool handlers — same convention everywhere: a caller with no resolved userId (MCP's unscoped dev path) sees only unowned/legacy documents, never everyone's. */
 export function ownerFilter(userId: string | null | undefined) {
   if (!userId) return isNull(schema.documents.userId);
-  return or(eq(schema.documents.userId, userId), isNull(schema.documents.userId));
+  return eq(schema.documents.userId, userId);
 }
 
 /** Resolve a possibly-loose category string to a canonical leaf, or null. */
@@ -216,7 +216,7 @@ export async function fileDocumentInCategory(
     .where(eq(schema.documents.id, documentId))
     .get();
   if (!doc) return null;
-  if (userId && doc.userId && doc.userId !== userId) return null;
+  if (userId && doc.userId !== userId) return null;
 
   const owner = userId ?? doc.userId ?? null;
   const divisionId = leaf.division ? await findOrCreateFolder(db, leaf.division, null, owner) : null;

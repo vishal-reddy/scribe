@@ -68,16 +68,42 @@ describe('ownerless rows grant nothing', () => {
     const now = Math.floor(Date.now() / 1000);
     await env.DB.prepare(
       `INSERT INTO documents (id, user_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by)
-       VALUES (?, NULL, 'orphan', '', 'secret body', ?, ?, 'legacy', 'legacy')`
+       VALUES (?, NULL, 'orphan-secret-title', '', 'secret body', ?, ?, 'legacy', 'legacy')`
     ).bind(id, now, now).run();
 
-    const { getAuthHeaders } = await import('../helpers');
+    const { getAuthHeaders, userIdFor } = await import('../helpers');
     const headers = getAuthHeaders('anyone@example.com');
+    const jsonHeaders = { ...headers, 'Content-Type': 'application/json' };
     const list: any = await (await app.request('/api/documents', { headers }, env)).json();
     expect(list.documents.some((d: any) => d.id === id)).toBe(false);
     expect((await app.request(`/api/documents/${id}`, { headers }, env)).status).toBe(404);
     expect((await app.request(`/api/documents/${id}`, { method: 'DELETE', headers }, env)).status).toBe(404);
     expect((await app.request(`/api/sync/${id}/ws`, { headers }, env)).status).toBe(404);
+
+    // Claude endpoints must also reject ownerless documents
+    expect((await app.request(`/api/claude/artifacts/${id}`, { headers }, env)).status).toBe(404);
+    expect((await app.request(`/api/claude/edit/${id}`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ instruction: 'edit' }) }, env)).status).toBe(404);
+    expect((await app.request('/api/claude/prompt', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ prompt: 'read this', documentId: id }) }, env)).status).toBe(404);
+    expect((await app.request(`/api/claude/history/${id}`, { headers }, env)).status).toBe(404);
+
+    // Classification helpers must not leak or file ownerless documents for an authenticated user
+    const { drizzle } = await import('drizzle-orm/d1');
+    const schema = await import('../../src/db/schema');
+    const { listUnfiledDocuments, fileDocumentInCategory } = await import('../../src/services/classification');
+    const db = drizzle(env.DB, { schema });
+    const callerId = await userIdFor('anyone@example.com');
+    const unfiled = await listUnfiledDocuments(db, callerId);
+    expect(unfiled.some((d) => d.id === id)).toBe(false);
+    expect(await fileDocumentInCategory(db, id, 'Metaphysics', callerId)).toBeNull();
+
+    // /guidance page dropdown must not list ownerless documents
+    const sesId = `ses_${crypto.randomUUID().replace(/-/g, '')}`;
+    await env.DB.prepare(
+      `INSERT INTO web_sessions (session_id, user_id, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
+    ).bind(sesId, callerId, 'anyone@example.com', Date.now(), Date.now() + 60_000).run();
+    const guidanceHtml = await (await app.request('/guidance', { headers: { Cookie: `sc_session=${sesId}` } }, env)).text();
+    expect(guidanceHtml).not.toContain('orphan-secret-title');
+    expect(guidanceHtml).not.toContain(id);
   });
 });
 
@@ -190,5 +216,185 @@ describe('publish visibility validation', () => {
     expect((await post(JSON.stringify({ visibility: '<script>' }))).status).toBe(400);
     expect((await app.request(`/d/${id}`, {}, env)).status).toBe(404); // nothing got published
     expect((await post(JSON.stringify({ visibility: 'public' }))).status).toBe(200);
+  });
+});
+
+describe('document links, tags, backlinks, and move authorization', () => {
+  it('prevents strangers from reading and viewers from mutating links, tags, backlinks, or hierarchy', async () => {
+    const { getAuthHeaders, userIdFor } = await import('../helpers');
+    const { drizzle } = await import('drizzle-orm/d1');
+    const schema = await import('../../src/db/schema');
+    const { reparseDocument, rebindLinksToTitle } = await import('../../src/services/notes');
+
+    const ownerEmail = 'doc-owner@example.com';
+    const viewerEmail = 'doc-viewer@example.com';
+    const strangerEmail = 'doc-stranger@example.com';
+    const ownerId = await userIdFor(ownerEmail);
+    const viewerId = await userIdFor(viewerEmail);
+    const strangerId = await userIdFor(strangerEmail);
+    const owner = { ...getAuthHeaders(ownerEmail), 'Content-Type': 'application/json' };
+    const viewer = { ...getAuthHeaders(viewerEmail), 'Content-Type': 'application/json' };
+    const stranger = { ...getAuthHeaders(strangerEmail), 'Content-Type': 'application/json' };
+
+    const now = Math.floor(Date.now() / 1000);
+    const docId = crypto.randomUUID();
+    const shareId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(`INSERT OR IGNORE INTO users (id, email, created_at, is_verified) VALUES (?, ?, ?, 1)`).bind(ownerId, ownerEmail, now),
+      env.DB.prepare(`INSERT OR IGNORE INTO users (id, email, created_at, is_verified) VALUES (?, ?, ?, 1)`).bind(viewerId, viewerEmail, now),
+      env.DB.prepare(`INSERT OR IGNORE INTO users (id, email, created_at, is_verified) VALUES (?, ?, ?, 1)`).bind(strangerId, strangerEmail, now),
+      env.DB.prepare(
+        `INSERT INTO documents (id, user_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by)
+         VALUES (?, ?, 'Owner Note', '', 'See [[Unresolved Target]] #secrettag', ?, ?, 'user', 'user')`
+      ).bind(docId, ownerId, now, now),
+      env.DB.prepare(
+        `INSERT INTO document_shares (id, document_id, user_id, email, role, created_by_user_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'viewer', ?, ?, ?)`
+      ).bind(shareId, docId, viewerId, viewerEmail, ownerId, now, now),
+    ]);
+
+    const db = drizzle(env.DB, { schema });
+    await reparseDocument(db, docId, 'See [[Unresolved Target]] #secrettag', ownerId);
+
+    // Stranger cannot read links, tags, or backlinks, nor mutate
+    expect((await app.request(`/api/documents/${docId}/links`, { headers: stranger }, env)).status).toBe(404);
+    expect((await app.request(`/api/documents/${docId}/tags`, { headers: stranger }, env)).status).toBe(404);
+    expect((await app.request(`/api/documents/${docId}/backlinks`, { headers: stranger }, env)).status).toBe(404);
+    expect((await app.request(`/api/documents/${docId}/tags`, { method: 'POST', headers: stranger, body: JSON.stringify({ tag: 'pwn' }) }, env)).status).toBe(404);
+    expect((await app.request(`/api/documents/${docId}/tags/secrettag`, { method: 'DELETE', headers: stranger }, env)).status).toBe(404);
+    expect((await app.request(`/api/documents/${docId}/move`, { method: 'POST', headers: stranger, body: JSON.stringify({ sortKey: 'z' }) }, env)).status).toBe(404);
+
+    // Viewer can read links, tags, and backlinks, but cannot mutate
+    expect((await app.request(`/api/documents/${docId}/links`, { headers: viewer }, env)).status).toBe(200);
+    expect((await app.request(`/api/documents/${docId}/tags`, { headers: viewer }, env)).status).toBe(200);
+    expect((await app.request(`/api/documents/${docId}/backlinks`, { headers: viewer }, env)).status).toBe(200);
+    expect((await app.request(`/api/documents/${docId}/move`, { method: 'POST', headers: viewer, body: JSON.stringify({ sortKey: 'z' }) }, env)).status).toBe(403);
+    expect((await app.request(`/api/documents/${docId}/links`, { method: 'POST', headers: viewer, body: JSON.stringify({ targetId: docId }) }, env)).status).toBe(403);
+    expect((await app.request(`/api/documents/${docId}/tags`, { method: 'POST', headers: viewer, body: JSON.stringify({ tag: 'newtag' }) }, env)).status).toBe(403);
+    expect((await app.request(`/api/documents/${docId}/tags/secrettag`, { method: 'DELETE', headers: viewer }, env)).status).toBe(403);
+
+    const ownerLinks = ((await (await app.request(`/api/documents/${docId}/links`, { headers: owner }, env)).json()) as any).links;
+    expect(ownerLinks.length).toBe(1);
+    const linkId = ownerLinks[0].id;
+    expect((await app.request(`/api/documents/${docId}/links/${linkId}`, { method: 'DELETE', headers: viewer }, env)).status).toBe(403);
+
+    // Stranger creating a note with title "Unresolved Target" must not hijack owner's unresolved wikilink
+    const strangerDocId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO documents (id, user_id, title, content, markdown, created_at, updated_at, created_by, last_edited_by)
+       VALUES (?, ?, 'Unresolved Target', '', 'stranger note', ?, ?, 'user', 'user')`
+    ).bind(strangerDocId, strangerId, now, now).run();
+    await rebindLinksToTitle(db, strangerDocId, 'Unresolved Target');
+
+    const linksAfterStranger = ((await (await app.request(`/api/documents/${docId}/links`, { headers: owner }, env)).json()) as any).links;
+    expect(linksAfterStranger[0].targetId).toBeNull();
+  }, 15000);
+});
+
+describe('OAuth redirect_uri scheme validation and PKCE/Origin checks', () => {
+  it('rejects javascript:, data:, file:, and blob: redirect_uris on client registration', async () => {
+    for (const badUri of [
+      'javascript:alert(1)',
+      'data:text/html,<script>alert(1)</script>',
+      'vbscript:msgbox(1)',
+      'file:///etc/passwd',
+      'blob:https://example.com/uuid',
+      'http://example.com/callback',
+    ]) {
+      const res = await app.request('/oauth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_name: 'bad', redirect_uris: [badUri] }),
+      }, env);
+      expect(res.status).toBe(400);
+    }
+
+    const goodRes = await app.request('/oauth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_name: 'good', redirect_uris: ['https://client.example.com/cb', 'cursor://oauth/callback'] }),
+    }, env);
+    expect(goodRes.status).toBe(201);
+    const client: any = await goodRes.json();
+
+    // Create a web session to test POST /oauth/authorize Origin and PKCE validation
+    const sesId = `ses_${crypto.randomUUID().replace(/-/g, '')}`;
+    await env.DB.prepare(
+      `INSERT INTO web_sessions (session_id, user_id, email, created_at, expires_at) VALUES (?, 'u-oauth', 'oauth@example.com', ?, ?)`
+    ).bind(sesId, Date.now(), Date.now() + 60_000).run();
+
+    // Cross-origin POST to /oauth/authorize is blocked
+    const crossOrigin = await app.request('https://scribe.test/oauth/authorize', {
+      method: 'POST',
+      headers: {
+        Cookie: `sc_session=${sesId}`,
+        Origin: 'https://evil.example',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        decision: 'approve',
+        client_id: client.client_id,
+        redirect_uri: 'https://client.example.com/cb',
+        code_challenge: 'challenge123',
+        code_challenge_method: 'S256',
+      }).toString(),
+    }, env);
+    expect(crossOrigin.status).toBe(403);
+
+    // POST /oauth/authorize without PKCE S256 does not issue a code
+    const noPkce = await app.request('https://scribe.test/oauth/authorize', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        Cookie: `sc_session=${sesId}`,
+        Origin: 'https://scribe.test',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        decision: 'approve',
+        client_id: client.client_id,
+        redirect_uri: 'https://client.example.com/cb',
+      }).toString(),
+    }, env);
+    expect(noPkce.status).toBe(302);
+    expect(noPkce.headers.get('Location')).toContain('error=invalid_request');
+  });
+});
+
+describe('web session revocation and Origin validation on form POSTs', () => {
+  it('deletes the session from D1 on /auth/logout and rejects cross-origin or null-Origin POSTs', async () => {
+    const sesId = `ses_${crypto.randomUUID().replace(/-/g, '')}`;
+    await env.DB.prepare(
+      `INSERT INTO web_sessions (session_id, user_id, email, created_at, expires_at) VALUES (?, 'u-logout', 'logout@example.com', ?, ?)`
+    ).bind(sesId, Date.now(), Date.now() + 60_000).run();
+
+    // Null Origin on /guidance and /join returns 403 (instead of throwing 500 or succeeding)
+    const nullOriginGuidance = await app.request('https://scribe.test/guidance', {
+      method: 'POST',
+      headers: { Cookie: `sc_session=${sesId}`, Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'action=save_user&text=hi',
+    }, env);
+    expect(nullOriginGuidance.status).toBe(403);
+
+    const crossOriginJoin = await app.request('https://scribe.test/join?token=abc', {
+      method: 'POST',
+      headers: { Cookie: `sc_session=${sesId}`, Origin: 'https://evil.example' },
+    }, env);
+    expect(crossOriginJoin.status).toBe(403);
+
+    // Logout deletes the server-side session row so the cookie can no longer authenticate
+    const logoutRes = await app.request('https://scribe.test/auth/logout', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { Cookie: `sc_session=${sesId}` },
+    }, env);
+    expect(logoutRes.status).toBe(302);
+
+    const afterLogout = await app.request('https://scribe.test/guidance', {
+      redirect: 'manual',
+      headers: { Cookie: `sc_session=${sesId}` },
+    }, env);
+    expect(afterLogout.status).toBe(302);
+    expect(afterLogout.headers.get('Location')).toContain('/auth/kinde/login');
   });
 });

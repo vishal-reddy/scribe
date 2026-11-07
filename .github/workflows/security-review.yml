@@ -1,0 +1,43 @@
+name: Weekly security review
+
+# An agy-driven reviewer fixes clear security issues on a branch, opens a PR, has a second
+# agent session review it, and merges only if that review says SAFE. See scripts/security-agent/run.sh.
+# Runs on the dedicated `security-agent` runner (an unprivileged user with agy signed in).
+on:
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC
+  workflow_dispatch:
+    inputs:
+      merge:
+        description: "Merge the PR if the reviewer says SAFE (false = open the PR only)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: security-review
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  review:
+    name: Security review (agy)
+    runs-on: [self-hosted, security-agent]
+    timeout-minutes: 90
+    env:
+      # A PAT is needed to merge past the required-review rule; the default token can still open the PR.
+      GH_TOKEN: ${{ secrets.SECURITY_AGENT_TOKEN || github.token }}
+      MERGE: ${{ github.event_name == 'schedule' && 'true' || inputs.merge }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SECURITY_AGENT_TOKEN || github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Run the security agent
+        run: bash scripts/security-agent/run.sh

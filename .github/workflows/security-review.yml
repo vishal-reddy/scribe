@@ -33,6 +33,8 @@ jobs:
       # With SECURITY_AGENT_TOKEN unset, gh uses the login stored for the runner user (admin, so it can merge
       # past the required-review rule). The default token alone can neither create nor merge these PRs.
       GH_TOKEN: ${{ secrets.SECURITY_AGENT_TOKEN }}
+      # The Mac mini is slow; the default 5s/10s vitest timeouts fail the Workers pool there.
+      TEST_CMD: npx tsc --noEmit && npx vitest run --testTimeout=120000 --hookTimeout=300000 --maxWorkers=2
       MERGE: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.merge }}
     steps:
       - uses: actions/checkout@v4

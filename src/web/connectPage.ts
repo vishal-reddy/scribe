@@ -1,5 +1,5 @@
 /**
- * "Connect Claude" setup guide — a self-contained, accessible HTML page served
+ * "Connect an AI assistant" setup guide — a self-contained, accessible HTML page served
  * at GET /connect. Designed against Nielsen Norman Group usability standards:
  *  - Visibility of system status (copy confirmation, numbered progress)
  *  - Match to the real world (plain language, no jargon)
@@ -13,6 +13,8 @@
  * in its own brand palette/fonts. Drop this file into the app's worker and serve
  * `renderConnectPage(<APP>_CONNECT)` from GET /connect.
  */
+
+import { renderPlatformGuides } from './connectPlatforms';
 
 export interface ConnectTheme {
   bg: string;
@@ -56,7 +58,7 @@ export const SCRIBE_CONNECT: ConnectConfig = {
   appName: 'Scribe',
   brand: 'SCRIBE',
   mcpUrl: 'https://scribe.kecker.co/mcp',
-  tagline: 'Connect Claude to Scribe once, then read, write, search, and auto-organize your notes from any conversation.',
+  tagline: 'Connect your AI assistant to Scribe once, then read, write, search, and auto-organize your notes from any conversation.',
   examplePrompts: [
     'List my Scribe documents.',
     'Create a note titled “Q3 ideas” with three bullet points.',
@@ -83,8 +85,8 @@ export function renderConnectPage(cfg: ConnectConfig = SCRIBE_CONNECT): string {
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Connect Claude to ${esc(appName)}</title>
-<meta name="description" content="Step-by-step guide to connecting Claude to ${esc(appName)} as a custom connector."/>
+<title>Connect an AI assistant to ${esc(appName)}</title>
+<meta name="description" content="Step-by-step guide to connecting ChatGPT, Claude, Gemini, Cursor, VS Code and any other MCP-compatible assistant to ${esc(appName)}."/>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="${t.fontsHref}" rel="stylesheet">
@@ -136,6 +138,9 @@ summary{cursor:pointer;padding:16px 18px;font-weight:600;font-size:15px;list-sty
 summary::-webkit-details-marker{display:none}
 summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
 details[open] summary::after{content:"–"}
+.platform-group{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:28px 0 8px;font-weight:600}
+.body pre{background:var(--hover);border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:13px;line-height:1.5;margin:8px 0}
+.body ol{margin:6px 0 6px 20px;padding:0}.body li{margin:6px 0}
 details .body{padding:0 18px 16px;font-size:14.5px;color:var(--muted);line-height:1.6}
 footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;margin-top:72px}
 .footer-brand{font-family:var(--brand);font-weight:700;font-size:12px;letter-spacing:0.18em;color:var(--muted);text-decoration:none}
@@ -158,14 +163,14 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
 <main id="main">
   <div class="hero">
     <p class="eyebrow">Setup guide · 2 minutes</p>
-    <h1>Connect Claude<br>to <em>${esc(appName)}</em>.</h1>
+    <h1>Connect your AI assistant<br>to <em>${esc(appName)}</em>.</h1>
     <p class="sub">${esc(cfg.tagline)}</p>
   </div>
 
-  <div class="diagram" role="img" aria-label="Diagram: you talk to Claude, and Claude connects to ${esc(appName)}.">
+  <div class="diagram" role="img" aria-label="Diagram: you talk to your AI assistant, and it connects to ${esc(appName)}.">
     <div class="node"><div class="node-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg></div><span>You</span></div>
     <div class="arrow" aria-hidden="true">→</div>
-    <div class="node"><div class="node-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></svg></div><span>Claude</span></div>
+    <div class="node"><div class="node-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></svg></div><span>Your AI assistant</span></div>
     <div class="arrow" aria-hidden="true">→</div>
     <div class="node"><div class="node-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M10 12.5h5M10 16h5"/></svg></div><span>${esc(appName)}</span></div>
   </div>
@@ -174,7 +179,7 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
     <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3.5 20.5l1.4-5.2A8.5 8.5 0 1 1 21 11.5z"/></svg></span>
     <div>
       <h2>How this works</h2>
-      <p><strong>Claude is the assistant you talk to.</strong> Ask Claude to read, write, search, or organize your notes and it does the work in ${esc(appName)}. Open the <strong>${esc(appName)} app</strong> on your phone any time to see and manage the results.</p>
+      <p><strong>Your AI assistant is who you talk to.</strong> Ask it to read, write, search, or organize your notes and it does the work in ${esc(appName)}. Open the <strong>${esc(appName)} app</strong> on your phone any time to see and manage the results.</p>
     </div>
   </div>
 
@@ -182,28 +187,22 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
     <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 11.5h1V16h1"/></svg></span>
     <div>
       <h2>Before you start</h2>
-      <p>You add the connector in <strong>Claude Desktop</strong> or <strong>claude.ai</strong> (a browser) — <strong>not the Claude mobile app</strong>. The <strong>free Claude plan works</strong> — you just need a <strong>${esc(appName)} account</strong> (the same email you use in the ${esc(appName)} app).</p>
+      <p>${esc(appName)} is a standard remote <strong>MCP server</strong>, so it works with any assistant that supports MCP — ChatGPT, Claude, Gemini, Perplexity, Cursor, VS Code and more. You need an <strong>${esc(appName)} account</strong> (the same email you use in the ${esc(appName)} app). Some assistants only allow adding connectors on desktop or the web, and some plans limit custom connectors.</p>
     </div>
   </div>
 
-  <h2 class="section-label" id="guide">Connect in 5 steps</h2>
+  <h2 class="section-label" id="guide">Connect in 4 steps</h2>
   <ol class="steps">
     <li>
       <div>
-        <p class="step-t">Open Claude on desktop or web</p>
-        <p class="step-d"><strong>Custom connectors can’t be added from the Claude mobile app.</strong> Use <kbd>Claude Desktop</kbd> (Mac or Windows) or <kbd>claude.ai</kbd> in a browser to set this up.</p>
+        <p class="step-t">Pick your assistant</p>
+        <p class="step-d">Any assistant that supports <strong>remote MCP servers</strong> works. Find yours in <a href="#platforms">the list below</a> for exact steps.</p>
       </div>
     </li>
     <li>
       <div>
-        <p class="step-t">Go to Settings → Connectors</p>
-        <p class="step-d">Open Claude’s <kbd>Settings</kbd>, then the <kbd>Connectors</kbd> tab.</p>
-      </div>
-    </li>
-    <li>
-      <div>
-        <p class="step-t">Add a custom connector</p>
-        <p class="step-d">Click <kbd>Add custom connector</kbd>. The only field that matters is the server URL — paste ${esc(appName)}’s address below.</p>
+        <p class="step-t">Add ${esc(appName)} as a connector</p>
+        <p class="step-d">In your assistant, add a custom connector or remote MCP server. The only field that matters is the server URL — paste ${esc(appName)}’s address below.</p>
       </div>
       <div class="copy-box">
         <code class="copy-url" id="mcpurl">${esc(mcpUrl)}</code>
@@ -215,30 +214,36 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
     <li>
       <div>
         <p class="step-t">Sign in to ${esc(appName)}</p>
-        <p class="step-d">A ${esc(appName)} window opens. Sign in with your email and approve access. You only do this once. <strong>No token or header to paste</strong> — sign-in handles it.</p>
+        <p class="step-d">An ${esc(appName)} window opens. Sign in with your email and approve access. You only do this once. <strong>No token or config file to edit</strong> — sign-in handles it.</p>
       </div>
     </li>
     <li>
       <div>
         <p class="step-t">You’re connected</p>
-        <p class="step-d">Claude can now work with ${esc(appName)}. Try one of the prompts below.</p>
+        <p class="step-d">Your assistant can now work with ${esc(appName)}. Try one of the prompts below.</p>
       </div>
     </li>
   </ol>
 
-  <p class="alt-note">These steps show <strong>Claude</strong> — the most common setup. ${esc(appName)} is a standard MCP server, so it also works with <strong>ChatGPT</strong> and other MCP-compatible assistants: add the same URL as a connector there.</p>
+  <h2 class="section-label" id="platforms">Steps for your assistant</h2>
+  <p class="alt-note">These are the popular ones. ${esc(appName)} is a standard MCP server, so if yours isn’t listed, add the same URL as a remote MCP server. Menu names and plan limits change, so look for the closest match.</p>
+  ${renderPlatformGuides(appName, mcpUrl)}
 
   <h2 class="section-label">Try saying</h2>
   <ul class="prompts">${promptItems}</ul>
 
   <h2 class="section-label">If something’s not working</h2>
   <details>
-    <summary>Claude says it can’t find my ${esc(appName)} data</summary>
-    <div class="body">Open Claude → <kbd>Settings</kbd> → <kbd>Connectors</kbd> → ${esc(appName)} and confirm it shows your email (signed in). If not, click it and sign in again.</div>
+    <summary>My assistant says it can’t find my ${esc(appName)} data</summary>
+    <div class="body">Open your assistant’s connector settings, find ${esc(appName)}, and confirm it shows your email (signed in). If not, open it and sign in again.</div>
   </details>
   <details>
-    <summary>I don’t see “Add custom connector”</summary>
-    <div class="body">You’re likely in the Claude <strong>mobile</strong> app — connectors can only be added in <kbd>Claude Desktop</kbd> or <kbd>claude.ai</kbd> (a browser). Open Claude there, then <kbd>Settings</kbd> → <kbd>Connectors</kbd>.</div>
+    <summary>I don’t see a way to add a custom connector</summary>
+    <div class="body">Many assistants only allow it on desktop or the web, not in their mobile app, and some limit it by plan or need an admin to allow it. Set it up there once and it usually carries over to mobile.</div>
+  </details>
+  <details>
+    <summary>My assistant only supports local (stdio) servers</summary>
+    <div class="body">Bridge it with <code>npx mcp-remote ${esc(mcpUrl)}</code>, or use a client that supports remote MCP servers directly.</div>
   </details>
   <details>
     <summary>It’s asking me for a token or an authorization header</summary>

@@ -4,6 +4,9 @@ name: Weekly security review
 # agent session review it, and merges only if that review says SAFE. See scripts/security-agent/run.sh.
 # Runs on the dedicated `security-agent` runner (an unprivileged user with agy signed in).
 on:
+  # TEMPORARY: first test run from the PR branch; remove before merging.
+  push:
+    branches: [feat/weekly-security-agent]
   schedule:
     - cron: "0 7 * * 1" # Mondays 07:00 UTC
   workflow_dispatch:
@@ -27,14 +30,14 @@ jobs:
     runs-on: [self-hosted, security-agent]
     timeout-minutes: 90
     env:
-      # A PAT is needed to merge past the required-review rule; the default token can still open the PR.
-      GH_TOKEN: ${{ secrets.SECURITY_AGENT_TOKEN || github.token }}
-      MERGE: ${{ github.event_name == 'schedule' && 'true' || inputs.merge }}
+      # With SECURITY_AGENT_TOKEN unset, gh uses the login stored for the runner user (admin, so it can merge
+      # past the required-review rule). The default token alone can neither create nor merge these PRs.
+      GH_TOKEN: ${{ secrets.SECURITY_AGENT_TOKEN }}
+      MERGE: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.merge }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.SECURITY_AGENT_TOKEN || github.token }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

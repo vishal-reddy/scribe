@@ -15,7 +15,9 @@ BASE_BRANCH="${BASE_BRANCH:-main}"
 MAX_DIFF_LINES="${MAX_DIFF_LINES:-400}"
 TEST_CMD="${TEST_CMD:-npx tsc --noEmit && npx vitest run}"
 MERGE="${MERGE:-true}"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Copy the prompts aside: the work branch is cut from origin/main, which may not have them yet.
+HERE="$(mktemp -d)"
+cp "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"/*.md "$HERE/"
 WORK=".security-agent"
 BRANCH="security/weekly-$(date -u +%Y-%m-%d-%H%M)"
 PROTECTED_RE='^(\.github/|wrangler\.toml|drizzle/|migrations/|\.dev\.vars|\.env|scripts/security-agent/)'

@@ -8,7 +8,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { createDocumentSchema, updateDocumentSchema } from '../types';
 import type { Env } from '../types';
-import { resolveScope } from '../lib/orgs';
+import { resolveScope, listOrganizationsForUser } from '../lib/orgs';
 import {
   getDocumentPermission,
   shareDocument,
@@ -68,9 +68,16 @@ documents.get('/search', async (c) => {
   const shareMap = await getAccessibleDirectShares(c.env, userId, userEmail);
   const sharedDocIds = Array.from(shareMap.keys());
 
+  // ?scope=all lists documents from every workspace the caller belongs to, not just the active one.
+  // Clients filter the result down to one org or workspace themselves (each document carries its orgId).
+  const allScopes = c.req.query('scope') === 'all';
+  const memberOrgIds = allScopes
+    ? (await listOrganizationsForUser(c.env, userId)).map((o) => o.id)
+    : [activeOrgId];
+
   const ownershipFilter = or(
     eq(schema.documents.userId, userId),
-    eq(schema.documents.orgId, activeOrgId),
+    inArray(schema.documents.orgId, memberOrgIds),
     sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined
   );
 
@@ -123,7 +130,7 @@ documents.get('/search', async (c) => {
       const directRole = shareMap.get(doc.id);
       return {
         ...doc,
-        isSharedWithMe: !isOwner && doc.orgId !== activeOrgId,
+        isSharedWithMe: !isOwner && !(doc.orgId && memberOrgIds.includes(doc.orgId)),
         accessLevel: isOwner ? 'owner' : (directRole || 'editor'),
       };
     });
@@ -149,9 +156,14 @@ documents.get('/', async (c) => {
   const shareMap = await getAccessibleDirectShares(c.env, userId, userEmail);
   const sharedDocIds = Array.from(shareMap.keys());
 
+  const allScopes = c.req.query('scope') === 'all';
+  const memberOrgIds = allScopes
+    ? (await listOrganizationsForUser(c.env, userId)).map((o) => o.id)
+    : [activeOrgId];
+
   const ownershipFilter = or(
     eq(schema.documents.userId, userId),
-    eq(schema.documents.orgId, activeOrgId),
+    inArray(schema.documents.orgId, memberOrgIds),
     sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined
   );
 
@@ -188,7 +200,7 @@ documents.get('/', async (c) => {
       const directRole = shareMap.get(doc.id);
       return {
         ...doc,
-        isSharedWithMe: !isOwner && doc.orgId !== activeOrgId,
+        isSharedWithMe: !isOwner && !(doc.orgId && memberOrgIds.includes(doc.orgId)),
         accessLevel: isOwner ? 'owner' : (directRole || 'editor'),
       };
     });

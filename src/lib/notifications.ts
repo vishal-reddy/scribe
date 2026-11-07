@@ -6,7 +6,7 @@ interface EditNotification {
 }
 
 /**
- * Create a notification for Claude edits
+ * Create a notification for AI edits
  */
 export function createClaudeEditNotification(
   documentId: string,
@@ -16,7 +16,7 @@ export function createClaudeEditNotification(
     documentId,
     editedBy: 'claude',
     timestamp: new Date(),
-    summary: `Claude edited based on: "${prompt.substring(0, 50)}..."`,
+    summary: `Your AI assistant edited based on: "${prompt.substring(0, 50)}..."`,
   };
 }
 

@@ -69,11 +69,11 @@ const _esc = (s: string) =>
 function renderLandingPage(session: SessionData | null, origin: string): string {
 
   const navRight = session
-    ? `<a href="/connect" class="nav-link">Connect Claude</a><a href="/guidance" class="nav-link">Writing guidance</a><span class="nav-email">${_esc(session.email)}</span><a href="/auth/logout" class="nav-ghost">Sign out</a>`
-    : `<a href="/connect" class="nav-link">Connect Claude</a><a href="/auth/kinde/login" class="nav-link">Sign in</a><a href="/auth/kinde/login" class="nav-btn">Get started</a>`;
+    ? `<a href="/connect" class="nav-link">Connect your AI</a><a href="/guidance" class="nav-link">Writing guidance</a><span class="nav-email">${_esc(session.email)}</span><a href="/auth/logout" class="nav-ghost">Sign out</a>`
+    : `<a href="/connect" class="nav-link">Connect your AI</a><a href="/auth/kinde/login" class="nav-link">Sign in</a><a href="/auth/kinde/login" class="nav-btn">Get started</a>`;
 
   const heroCta = session
-    ? `<a href="/connect" class="btn-primary connect-cta">Connect Claude to Scribe →</a>
+    ? `<a href="/connect" class="btn-primary connect-cta">Connect your AI assistant to Scribe →</a>
        <div class="connect-section">
         <p class="connect-or">or copy the server URL</p>
         <div class="connect-box">
@@ -82,7 +82,7 @@ function renderLandingPage(session: SessionData | null, origin: string): string 
         </div>
       </div>`
     : `<div class="hero-cta">
-        <a href="/connect" class="btn-primary">Connect Claude →</a>
+        <a href="/connect" class="btn-primary">Connect your AI assistant →</a>
         <a href="/auth/kinde/login" class="btn-secondary">Create account</a>
       </div>`;
 
@@ -91,7 +91,7 @@ function renderLandingPage(session: SessionData | null, origin: string): string 
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Scribe — Documents for Claude</title>
+<title>Scribe — Documents for your AI assistant</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600&family=Nunito:wght@700&display=swap" rel="stylesheet">
@@ -155,8 +155,8 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
 <main>
   <div class="hero">
     <p class="eyebrow">Document Server · MCP</p>
-    <h1>Your notes,<br><em>inside</em> Claude.</h1>
-    <p class="sub">A personal document editor with a built-in MCP server. Let Claude read, write, and search your writing from any conversation.</p>
+    <h1>Your notes,<br><em>inside</em> your AI.</h1>
+    <p class="sub">A personal document editor with a built-in MCP server. Let any MCP-compatible assistant — ChatGPT, Claude, Gemini, Cursor and more — read, write, and search your writing from any conversation.</p>
     ${heroCta}
   </div>
   <div class="divider"><span class="divider-text">What you get</span></div>
@@ -170,7 +170,7 @@ footer{border-top:1px solid var(--surface-border);padding:28px 40px;display:flex
       <div class="feature-card">
         <div class="feature-icon">⌘</div>
         <h3>MCP Access</h3>
-        <p>Let Claude read and write your documents directly. No copy-paste, no context switching.</p>
+        <p>Let your AI assistant read and write your documents directly. No copy-paste, no context switching.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">↻</div>
@@ -394,7 +394,7 @@ app.post('/guidance', async (c) => {
   }
 });
 
-// Public "Connect Claude" setup guide (no auth — it's how new users get started).
+// Public "Connect an AI assistant" setup guide (no auth — it's how new users get started).
 app.get('/connect', (c) => c.html(renderConnectPage({ ...SCRIBE_CONNECT, mcpUrl: `${appBaseUrl(c.env)}/mcp` })));
 
 // Public workspace join invite landing page

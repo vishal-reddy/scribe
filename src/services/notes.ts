@@ -18,8 +18,8 @@ function ownership(userId: string | undefined) {
 
 export async function getDocument(db: Db, id: string, userId?: string) {
   const doc = await db.select().from(schema.documents).where(eq(schema.documents.id, id)).get();
-  if (!doc) return null;
-  if (userId && doc.userId && doc.userId !== userId) {
+  if (!doc || !doc.userId) return null;
+  if (userId && doc.userId !== userId) {
     if (doc.orgId) {
       const member = await db.select({ role: schema.organizationMembers.role })
         .from(schema.organizationMembers)
@@ -225,6 +225,12 @@ export async function reparseDocument(
 
 // After any doc's title changes, previously-unresolved wikilinks pointing to its title should resolve.
 export async function rebindLinksToTitle(db: Db, documentId: string, title: string) {
+  const doc = await db
+    .select({ userId: schema.documents.userId })
+    .from(schema.documents)
+    .where(eq(schema.documents.id, documentId))
+    .get();
+  if (!doc?.userId) return;
   await db
     .update(schema.noteLinks)
     .set({ targetId: documentId })
@@ -232,6 +238,7 @@ export async function rebindLinksToTitle(db: Db, documentId: string, title: stri
       and(
         sql`LOWER(${schema.noteLinks.targetText}) = LOWER(${title})`,
         sql`${schema.noteLinks.targetId} IS NULL`,
+        sql`${schema.noteLinks.sourceId} IN (SELECT id FROM documents WHERE user_id = ${doc.userId})`,
       ),
     );
 }
@@ -263,7 +270,7 @@ export async function getBacklinks(db: Db, targetId: string, userId?: string) {
     .orderBy(desc(schema.noteLinks.createdAt));
 
   if (!userId) return rows;
-  return rows.filter((r) => !r.sourceUserId || r.sourceUserId === userId);
+  return rows.filter((r) => r.sourceUserId === userId);
 }
 
 export async function addManualLink(
@@ -289,7 +296,7 @@ export async function addManualLink(
   return row;
 }
 
-export async function removeLink(db: Db, linkId: string, userId?: string) {
+export async function removeLink(db: Db, linkId: string, userId?: string, sourceId?: string) {
   const link = await db
     .select({
       id: schema.noteLinks.id,
@@ -301,8 +308,12 @@ export async function removeLink(db: Db, linkId: string, userId?: string) {
     .where(eq(schema.noteLinks.id, linkId))
     .get();
   if (!link) throw new NotFoundError('Link not found');
-  if (userId && link.sourceUserId && link.sourceUserId !== userId) {
+  if (sourceId && link.sourceId !== sourceId) {
     throw new NotFoundError('Link not found');
+  }
+  if (userId) {
+    const doc = await getDocument(db, link.sourceId, userId);
+    if (!doc) throw new NotFoundError('Link not found');
   }
   await db.delete(schema.noteLinks).where(eq(schema.noteLinks.id, linkId));
 }

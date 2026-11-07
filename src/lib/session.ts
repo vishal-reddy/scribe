@@ -36,6 +36,11 @@ export async function readSession(c: Context<{ Bindings: Env }>): Promise<Sessio
   return { user_id: row.user_id, email: row.email };
 }
 
-export function clearSession(c: Context<{ Bindings: Env }>): void {
+export async function clearSession(c: Context<{ Bindings: Env }>): Promise<void> {
+  const cookie = c.req.header('Cookie') ?? '';
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+  if (match?.[1]) {
+    await c.env.DB.prepare(`DELETE FROM web_sessions WHERE session_id = ?`).bind(match[1]).run();
+  }
   c.header('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
 }

@@ -18,7 +18,7 @@ import {
 import { publishDocument, unpublishDocument, parseVisibility, PublishError } from '../lib/publishing';
 import {
   reparseDocument, rebindLinksToTitle, moveDocument, getBacklinks, getOutgoingLinks,
-  addManualLink, removeLink, addTag, removeTag, NotFoundError,
+  addManualLink, removeLink, addTag, removeTag, NotFoundError, ValidationError,
 } from '../services/notes';
 import {
   THOMISTIC_TAXONOMY, TAXONOMY_CATEGORIES, fileDocumentInCategory,
@@ -566,6 +566,11 @@ documents.post('/:id/move', async (c) => {
   const documentId = c.req.param('id');
   const body = await c.req.json().catch(() => ({}));
   try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+    if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
+    if (!perm.canWrite) return c.json({ error: 'Forbidden: read-only access' }, 403);
+
     const doc = await moveDocument(db, {
       documentId,
       parentId: body.parentId ?? null,
@@ -776,26 +781,40 @@ documents.delete('/:id/shares/:shareId', async (c) => {
 /** Backlinks — notes that link TO this one. GET /api/documents/:id/backlinks */
 documents.get('/:id/backlinks', async (c) => {
   const db = drizzle(c.env.DB, { schema });
+  const documentId = c.req.param('id');
   const userId = c.get('userId');
-  const rows = await getBacklinks(db, c.req.param('id'), userId);
+  const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+  const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+  if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
+  const rows = await getBacklinks(db, documentId, userId);
   return c.json({ backlinks: rows });
 });
 
 /** Outgoing links from this note. GET /api/documents/:id/links */
 documents.get('/:id/links', async (c) => {
   const db = drizzle(c.env.DB, { schema });
-  const rows = await getOutgoingLinks(db, c.req.param('id'));
+  const documentId = c.req.param('id');
+  const userId = c.get('userId');
+  const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+  const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+  if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
+  const rows = await getOutgoingLinks(db, documentId);
   return c.json({ links: rows });
 });
 
 /** Add a manual link. POST /api/documents/:id/links { targetId } */
 documents.post('/:id/links', async (c) => {
   const db = drizzle(c.env.DB, { schema });
+  const documentId = c.req.param('id');
   const userId = c.get('userId');
   const body = await c.req.json().catch(() => ({}));
   if (!body.targetId) return c.json({ error: 'targetId required' }, 400);
   try {
-    const link = await addManualLink(db, c.req.param('id'), body.targetId, userId);
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+    if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
+    if (!perm.canWrite) return c.json({ error: 'Forbidden: read-only access' }, 403);
+    const link = await addManualLink(db, documentId, body.targetId, userId);
     return c.json({ link }, 201);
   } catch (e) {
     if (e instanceof NotFoundError) return c.json({ error: e.message }, 404);
@@ -806,9 +825,14 @@ documents.post('/:id/links', async (c) => {
 /** Remove a link. DELETE /api/documents/:id/links/:linkId */
 documents.delete('/:id/links/:linkId', async (c) => {
   const db = drizzle(c.env.DB, { schema });
+  const documentId = c.req.param('id');
   const userId = c.get('userId');
   try {
-    await removeLink(db, c.req.param('linkId'), userId);
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+    if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
+    if (!perm.canWrite) return c.json({ error: 'Forbidden: read-only access' }, 403);
+    await removeLink(db, c.req.param('linkId'), userId, documentId);
     return c.json({ success: true });
   } catch (e) {
     if (e instanceof NotFoundError) return c.json({ error: e.message }, 404);
@@ -819,10 +843,15 @@ documents.delete('/:id/links/:linkId', async (c) => {
 /** Tags on a document. GET /api/documents/:id/tags */
 documents.get('/:id/tags', async (c) => {
   const db = drizzle(c.env.DB, { schema });
+  const documentId = c.req.param('id');
+  const userId = c.get('userId');
+  const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+  const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+  if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
   const rows = await db
     .select({ tag: schema.noteTags.tag })
     .from(schema.noteTags)
-    .where(eq(schema.noteTags.documentId, c.req.param('id')))
+    .where(eq(schema.noteTags.documentId, documentId))
     .orderBy(schema.noteTags.tag);
   return c.json({ tags: rows.map((r) => r.tag) });
 });
@@ -830,19 +859,40 @@ documents.get('/:id/tags', async (c) => {
 /** Add a tag. POST /api/documents/:id/tags { tag } */
 documents.post('/:id/tags', async (c) => {
   const db = drizzle(c.env.DB, { schema });
+  const documentId = c.req.param('id');
   const userId = c.get('userId');
   const body = await c.req.json().catch(() => ({}));
   if (!body.tag) return c.json({ error: 'tag required' }, 400);
-  await addTag(db, c.req.param('id'), body.tag, userId);
-  return c.json({ success: true }, 201);
+  try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+    if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
+    if (!perm.canWrite) return c.json({ error: 'Forbidden: read-only access' }, 403);
+    await addTag(db, documentId, body.tag, userId);
+    return c.json({ success: true }, 201);
+  } catch (e) {
+    if (e instanceof NotFoundError) return c.json({ error: e.message }, 404);
+    if (e instanceof ValidationError) return c.json({ error: e.message }, 400);
+    return c.json({ error: 'Failed to add tag' }, 500);
+  }
 });
 
 /** Remove a tag. DELETE /api/documents/:id/tags/:tag */
 documents.delete('/:id/tags/:tag', async (c) => {
   const db = drizzle(c.env.DB, { schema });
+  const documentId = c.req.param('id');
   const userId = c.get('userId');
-  await removeTag(db, c.req.param('id'), c.req.param('tag'), userId);
-  return c.json({ success: true });
+  try {
+    const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+    const perm = await getDocumentPermission(c.env, documentId, userId, activeOrgId);
+    if (!perm.canRead) return c.json({ error: 'Document not found' }, 404);
+    if (!perm.canWrite) return c.json({ error: 'Forbidden: read-only access' }, 403);
+    await removeTag(db, documentId, c.req.param('tag'), userId);
+    return c.json({ success: true });
+  } catch (e) {
+    if (e instanceof NotFoundError) return c.json({ error: e.message }, 404);
+    return c.json({ error: 'Failed to remove tag' }, 500);
+  }
 });
 
 export default documents;

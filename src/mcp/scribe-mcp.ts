@@ -365,7 +365,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         guidanceSaved += " Shared instructions are attached; readers choose whether to follow them.";
       }
       // Derive #tags / [[wikilinks]] and heal links that pointed to this title.
-      await reparseDocument(db, documentId, newDoc.markdown ?? "");
+      await reparseDocument(db, documentId, newDoc.markdown ?? "", userId || undefined);
       await rebindLinksToTitle(db, documentId, title);
 
       if (userId) {
@@ -540,7 +540,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       };
 
       await db.insert(schema.documents).values(newDoc);
-      await reparseDocument(db, documentId, newDoc.markdown ?? "");
+      await reparseDocument(db, documentId, newDoc.markdown ?? "", userId || undefined);
       await rebindLinksToTitle(db, documentId, title);
 
       if (userId) {

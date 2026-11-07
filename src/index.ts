@@ -243,7 +243,7 @@ app.get('/', async (c) => {
 async function guidanceView(c: Context<{ Bindings: Env }>, userId: string, email: string, docId: string | null, notice: string | null, error: string | null) {
   const activeOrgId = await resolveScope(c.env, userId);
   const rows = await c.env.DB.prepare(
-    `SELECT id, title FROM documents WHERE user_id = ? OR org_id = ? OR user_id IS NULL ORDER BY updated_at DESC LIMIT 100`
+    `SELECT id, title FROM documents WHERE user_id = ? OR org_id = ? ORDER BY updated_at DESC LIMIT 100`
   ).bind(userId, activeOrgId).all<{ id: string; title: string }>();
 
   let selected: GuidancePageData['selected'] = null;
@@ -293,12 +293,21 @@ app.get('/guidance', async (c) => {
   return c.html(await guidanceView(c, session.user_id, session.email, c.req.query('doc') || null, notice, null));
 });
 
+function isSameOriginPost(c: Context<{ Bindings: Env }>): boolean {
+  const origin = c.req.header('Origin');
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === new URL(c.req.url).host;
+  } catch {
+    return false;
+  }
+}
+
 app.post('/guidance', async (c) => {
   const session = await readSession(c);
   if (!session) return c.redirect('/auth/kinde/login?return_to=%2Fguidance');
   // The session cookie is SameSite=Lax, and a form post must also come from this site.
-  const origin = c.req.header('Origin');
-  if (origin && new URL(origin).host !== new URL(c.req.url).host) return c.text('Forbidden', 403);
+  if (!isSameOriginPost(c)) return c.text('Forbidden', 403);
 
   const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, string>;
   const userId = session.user_id;
@@ -401,6 +410,7 @@ app.get('/join', async (c) => {
 });
 
 app.post('/join', async (c) => {
+  if (!isSameOriginPost(c)) return c.text('Forbidden', 403);
   const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, unknown>;
   const token = (c.req.query('token') || body['token']) as string | undefined;
   if (!token) return c.text('No invite token provided', 400);

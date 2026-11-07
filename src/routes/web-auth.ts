@@ -123,5 +123,5 @@ webAuthRoute.get('/kinde/callback', async (c) => {
   return c.redirect(returnTo, 302);
 });
 
-webAuthRoute.get('/logout', (c) => { clearSession(c); return c.redirect('/', 302); });
-webAuthRoute.post('/logout', (c) => { clearSession(c); return c.redirect('/', 302); });
+webAuthRoute.get('/logout', async (c) => { await clearSession(c); return c.redirect('/', 302); });
+webAuthRoute.post('/logout', async (c) => { await clearSession(c); return c.redirect('/', 302); });

@@ -29,6 +29,35 @@ describe('Document CRUD API', () => {
     });
   });
 
+  describe('GET /api/documents?scope=all', () => {
+    it('includes other workspaces\' documents only when scope=all', async () => {
+      const email = 'scopeall@example.com';
+      const headers = getAuthHeaders(email);
+      // Provision the user (and their personal org) with a first authed request.
+      await app.request('/api/documents', { headers }, env);
+      const me = await userIdFor(email);
+      const now = Date.now();
+      await env.DB.prepare(
+        "INSERT INTO organizations (id, name, is_personal, owner_user_id, created_at) VALUES ('org_scopeall', 'Other', 0, 'someone-else', ?)"
+      ).bind(now).run();
+      await env.DB.prepare(
+        "INSERT INTO organization_members (org_id, user_id, role, joined_at) VALUES ('org_scopeall', ?, 'member', ?)"
+      ).bind(me, now).run();
+      await env.DB.prepare(
+        "INSERT INTO documents (id, title, content, markdown, created_at, updated_at, created_by, last_edited_by, user_id, org_id) VALUES ('doc_scopeall', 'Teammate doc', '', 'x', ?, ?, 'user', 'user', 'someone-else', 'org_scopeall')"
+      ).bind(Math.floor(now / 1000), Math.floor(now / 1000)).run();
+
+      const active: any = await (await app.request('/api/documents', { headers }, env)).json();
+      expect(active.documents.map((d: any) => d.id)).not.toContain('doc_scopeall');
+
+      const all: any = await (await app.request('/api/documents?scope=all', { headers }, env)).json();
+      const doc = all.documents.find((d: any) => d.id === 'doc_scopeall');
+      expect(doc).toBeTruthy();
+      expect(doc.orgId).toBe('org_scopeall');
+      expect(doc.isSharedWithMe).toBe(false);
+    });
+  });
+
   describe('POST /api/documents', () => {
     it('should require authentication', async () => {
       const res = await app.request('/api/documents', {

@@ -129,7 +129,7 @@ For detailed architecture documentation, see [docs/ARCHITECTURE.md](docs/ARCHITE
 - **ORM**: [Drizzle ORM](https://orm.drizzle.team/) - Type-safe database toolkit
 - **Real-time**: [Durable Objects](https://developers.cloudflare.com/durable-objects/) - Stateful WebSocket coordination
 - **CRDT**: [Y.js](https://github.com/yjs/yjs) - Conflict-free collaborative editing
-- **AI**: [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) - Claude integration
+- **AI**: Claude connects over MCP (`/mcp`); the Worker makes no model calls of its own
 - **Validation**: [Zod](https://zod.dev/) - Schema validation
 
 ### Frontend

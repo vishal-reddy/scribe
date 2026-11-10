@@ -31,7 +31,6 @@ KINDE_DOMAIN = "https://kecker.kinde.com"
 KINDE_CLIENT_ID = "4e98217c88d24e728fc3b0c15e73e770"
 KINDE_AUDIENCE = "https://scribe.kecker.co"
 
-# In production, set via: wrangler secret put ANTHROPIC_API_KEY
 #   KINDE_CLIENT_SECRET — "Scribe Web" Kinde application's client secret
 # For local dev, add to .dev.vars file
 

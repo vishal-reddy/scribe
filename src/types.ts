@@ -11,7 +11,6 @@ export interface Env {
   ANALYTICS?: AnalyticsEngineDataset;
   CF_ACCESS_TEAM_DOMAIN?: string;
   CF_ACCESS_AUDIENCE?: string;
-  ANTHROPIC_API_KEY?: string;
   MCP_AUTH_TOKEN?: string;
   SCRIBE_API_KEY?: string;
   OAUTH_PEPPER: string;
@@ -72,23 +71,12 @@ export const updateDocumentSchema = z.object({
 });
 
 // Claude interaction schemas
-export const claudePromptSchema = z.object({
-  prompt: z.string().min(1).max(2000),
-  documentId: z.string().optional(),
-});
-
 export const claudeCreateDocumentSchema = z.object({
   title: z.string().min(1).max(200),
   content: z.string(),
 });
 
-export const claudeEditDocumentSchema = z.object({
-  instruction: z.string().min(1).max(1000),
-});
-
 // Export types
 export type CreateDocumentRequest = z.infer<typeof createDocumentSchema>;
 export type UpdateDocumentRequest = z.infer<typeof updateDocumentSchema>;
-export type ClaudePromptRequest = z.infer<typeof claudePromptSchema>;
 export type ClaudeCreateDocumentRequest = z.infer<typeof claudeCreateDocumentSchema>;
-export type ClaudeEditDocumentRequest = z.infer<typeof claudeEditDocumentSchema>;

@@ -1,17 +1,7 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import { app } from '../../src/index';
 import { applyMigrations, getAuthHeaders } from '../helpers';
-
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class MockAnthropic {
-    messages = {
-      create: async () => ({
-        content: [{ type: 'text', text: 'Edited content by Claude' }],
-      }),
-    };
-  },
-}));
 
 describe('Claude Artifacts API', () => {
   const authHeaders = getAuthHeaders();
@@ -111,51 +101,6 @@ describe('Claude Artifacts API', () => {
     });
   });
 
-  describe('POST /api/claude/edit/:id', () => {
-    it('should require authentication', async () => {
-      const res = await app.request('/api/claude/edit/some-id', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instruction: 'fix typos' }),
-      }, env);
-
-      expect(res.status).toBe(401);
-    });
-
-    it('should validate edit schema - empty instruction', async () => {
-      const res = await app.request(`/api/claude/edit/${artifactId}`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instruction: '' }),
-      }, env);
-
-      expect(res.status).toBe(400);
-    });
-
-    it('should return 404 for non-existent artifact', async () => {
-      const res = await app.request('/api/claude/edit/non-existent', {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instruction: 'fix typos' }),
-      }, env);
-
-      expect(res.status).toBe(404);
-    });
-
-    it('should edit an artifact using Claude', async () => {
-      const res = await app.request(`/api/claude/edit/${artifactId}`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instruction: 'Add more detail' }),
-      }, env);
-
-      expect(res.status).toBe(200);
-      const data: any = await res.json();
-      expect(data.artifact.artifactId).toBe(artifactId);
-      expect(data.artifact.content).toBe('Edited content by Claude');
-    });
-  });
-
   describe('GET /api/claude/history/:documentId', () => {
     it('should require authentication', async () => {
       const res = await app.request('/api/claude/history/some-id', {}, env);
@@ -172,8 +117,8 @@ describe('Claude Artifacts API', () => {
       expect(data.documentId).toBe(artifactId);
       expect(data).toHaveProperty('history');
       expect(Array.isArray(data.history)).toBe(true);
-      // Should have at least the create + edit interactions
-      expect(data.history.length).toBeGreaterThanOrEqual(2);
+      // Should have at least the create interaction
+      expect(data.history.length).toBeGreaterThanOrEqual(1);
     });
 
     it('should return empty history for unknown document', async () => {

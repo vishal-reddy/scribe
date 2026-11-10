@@ -2,10 +2,9 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc, count, or, sql } from 'drizzle-orm';
 import { zValidator } from '@hono/zod-validator';
-import Anthropic from '@anthropic-ai/sdk';
 import * as schema from '../db/schema';
 import { resolveScope, workspaceFilter } from '../lib/orgs';
-import { claudeCreateDocumentSchema, claudeEditDocumentSchema, claudePromptSchema, type Env } from '../types';
+import { claudeCreateDocumentSchema, type Env } from '../types';
 import { markdownToYjsUpdate } from '../lib/yjs-utils';
 import { createClaudeEditNotification, storeNotification } from '../lib/notifications';
 import { hasRecentUserEdit } from '../lib/conflict-detection';
@@ -25,19 +24,12 @@ function parsePagination(c: { req: { query: (key: string) => string | undefined 
  * GET /api/claude/status
  */
 claude.get('/status', async (c) => {
-  const hasApiKey = !!c.env.ANTHROPIC_API_KEY;
   return c.json({
     modes: {
       mcp: {
         available: true,
         endpoint: '/mcp',
         description: 'Connect Claude Desktop or Claude Code to use your Claude subscription directly',
-      },
-      api: {
-        available: hasApiKey,
-        description: hasApiKey
-          ? 'In-app Claude chat is active via API key'
-          : 'Set ANTHROPIC_API_KEY to enable in-app Claude chat. Otherwise use MCP with your Claude subscription.',
       },
     },
   });
@@ -188,216 +180,6 @@ claude.post('/create', zValidator('json', claudeCreateDocumentSchema), async (c)
   } catch (error) {
     console.error('Error creating artifact:', error);
     return c.json({ error: 'Failed to create artifact' }, 500);
-  }
-});
-
-/**
- * Edit an existing artifact (document) programmatically
- * POST /api/claude/edit/:id
- */
-claude.post('/edit/:id', zValidator('json', claudeEditDocumentSchema), async (c) => {
-  const db = drizzle(c.env.DB, { schema });
-  const artifactId = c.req.param('id');
-  const data = c.req.valid('json');
-  const userId = c.get('userId');
-
-  if (!c.env.ANTHROPIC_API_KEY) {
-    return c.json({
-      error: 'ANTHROPIC_API_KEY not configured',
-      hint: 'Use Claude Desktop or Claude Code with the MCP connector instead. Connect to /mcp to use your Claude subscription directly.',
-    }, 501);
-  }
-
-  try {
-    // Get current document
-    const doc = await db
-      .select()
-      .from(schema.documents)
-      .where(eq(schema.documents.id, artifactId))
-      .get();
-
-    if (!doc) {
-      return c.json({ error: 'Artifact not found' }, 404);
-    }
-
-    // Ownership check
-    if (!doc.userId || doc.userId !== userId) {
-      return c.json({ error: 'Artifact not found' }, 404);
-    }
-
-    // Use Claude to edit the document
-    const anthropic = new Anthropic({
-      apiKey: c.env.ANTHROPIC_API_KEY,
-    });
-
-    const message = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 4096,
-      system: `Edit this document according to the instruction. Return only the edited markdown content.\n\nCurrent document:\n${doc.markdown}`,
-      messages: [
-        {
-          role: 'user',
-          content: data.instruction,
-        },
-      ],
-    });
-
-    const editedContent = message.content[0].type === 'text' 
-      ? message.content[0].text 
-      : doc.markdown;
-
-    // Update document
-    const now = new Date();
-    await db
-      .update(schema.documents)
-      .set({
-        markdown: editedContent,
-        updatedAt: now,
-        lastEditedBy: 'claude',
-      })
-      .where(eq(schema.documents.id, artifactId));
-
-    // Log the edit
-    await db.insert(schema.claudeInteractions).values({
-      id: crypto.randomUUID(),
-      documentId: artifactId,
-      prompt: data.instruction,
-      response: editedContent,
-      operation: 'edit',
-      createdAt: now,
-    });
-
-    return c.json({
-      artifact: {
-        artifactId,
-        title: doc.title,
-        content: editedContent,
-        updatedAt: now.toISOString(),
-      },
-    });
-  } catch (error: any) {
-    console.error('Error editing artifact:', error);
-    return c.json(
-      { 
-        error: 'Failed to edit artifact',
-        details: error.message,
-      },
-      500
-    );
-  }
-});
-
-/**
- * Process a natural language prompt from the user
- * POST /api/claude/prompt
- */
-claude.post('/prompt', zValidator('json', claudePromptSchema), async (c) => {
-  const db = drizzle(c.env.DB, { schema });
-  const data = c.req.valid('json');
-  const userId = c.get('userId');
-
-  if (!c.env.ANTHROPIC_API_KEY) {
-    return c.json({
-      error: 'ANTHROPIC_API_KEY not configured',
-      hint: 'Use Claude Desktop or Claude Code with the MCP connector instead. Connect to /mcp to use your Claude subscription directly.',
-    }, 501);
-  }
-
-  try {
-    // Initialize Anthropic client
-    const anthropic = new Anthropic({
-      apiKey: c.env.ANTHROPIC_API_KEY,
-    });
-
-    // Get document context if documentId provided
-    let documentContext = '';
-    if (data.documentId) {
-      const doc = await db
-        .select()
-        .from(schema.documents)
-        .where(eq(schema.documents.id, data.documentId))
-        .get();
-
-      if (!doc) {
-        return c.json({ error: 'Document not found' }, 404);
-      }
-
-      // Ownership check
-      if (!doc.userId || doc.userId !== userId) {
-        return c.json({ error: 'Document not found' }, 404);
-      }
-
-      documentContext = `\n\nCurrent document:\nTitle: ${doc.title}\nContent:\n${doc.markdown}`;
-    }
-
-    // Build prompt for Claude
-    const systemPrompt = `You are a helpful writing assistant for the Scribe app. Help users create and edit markdown documents. Be concise and provide the edited content directly.${documentContext}`;
-
-    // Call Claude API
-    const message = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages: [
-        {
-          role: 'user',
-          content: data.prompt,
-        },
-      ],
-    });
-
-    // Extract response
-    const responseText = message.content[0].type === 'text' 
-      ? message.content[0].text 
-      : '';
-
-    // If editing an existing document, update it
-    if (data.documentId) {
-      const now = new Date();
-      
-      // Update markdown in database
-      await db
-        .update(schema.documents)
-        .set({
-          markdown: responseText,
-          updatedAt: now,
-          lastEditedBy: 'claude',
-        })
-        .where(eq(schema.documents.id, data.documentId));
-      
-      // Create notification for Claude edit
-      const notification = createClaudeEditNotification(data.documentId, data.prompt);
-      await storeNotification(notification, c.env);
-      
-      // TODO: Broadcast update to connected clients via Durable Object
-      // For now, clients will get the update on next sync
-    }
-
-    // Log interaction
-    const interactionId = crypto.randomUUID();
-    await db.insert(schema.claudeInteractions).values({
-      id: interactionId,
-      documentId: data.documentId || null,
-      prompt: data.prompt,
-      response: responseText,
-      operation: data.documentId ? 'edit' : 'create',
-      createdAt: new Date(),
-    });
-
-    return c.json({
-      response: responseText,
-      documentId: data.documentId,
-      interactionId,
-    });
-  } catch (error: any) {
-    console.error('Claude API error:', error);
-    return c.json(
-      { 
-        error: 'Failed to process prompt',
-        details: error.message,
-      },
-      500
-    );
   }
 });
 

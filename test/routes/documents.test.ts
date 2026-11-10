@@ -58,6 +58,47 @@ describe('Document CRUD API', () => {
     });
   });
 
+  describe('GET /api/documents is filtered to the active workspace', () => {
+    it('hides documents the caller owns in another workspace, but keeps legacy ones in the personal workspace', async () => {
+      const email = 'workspacefilter@example.com';
+      const headers = getAuthHeaders(email);
+      await app.request('/api/documents', { headers }, env);
+      const me = await userIdFor(email);
+      const now = Date.now();
+      const secs = Math.floor(now / 1000);
+      await env.DB.prepare(
+        "INSERT INTO organizations (id, name, is_personal, owner_user_id, created_at) VALUES ('org_wsfilter', 'Church', 0, ?, ?)"
+      ).bind(me, now).run();
+      await env.DB.prepare(
+        "INSERT INTO organization_members (org_id, user_id, role, joined_at) VALUES ('org_wsfilter', ?, 'owner', ?)"
+      ).bind(me, now).run();
+      const insert = (id: string, orgId: string | null) =>
+        env.DB.prepare(
+          "INSERT INTO documents (id, title, content, markdown, created_at, updated_at, created_by, last_edited_by, user_id, org_id) VALUES (?, ?, '', 'x', ?, ?, 'user', 'user', ?, ?)"
+        ).bind(id, id, secs, secs, me, orgId).run();
+      await insert('doc_ws_church', 'org_wsfilter');
+      await insert('doc_ws_legacy', null);
+      await insert('doc_ws_personal', `org_personal_${me}`);
+
+      const ids = async (path: string, extra: Record<string, string> = {}) =>
+        ((await (await app.request(path, { headers: { ...headers, ...extra } }, env)).json()) as any).documents.map((d: any) => d.id);
+
+      const personal = await ids('/api/documents');
+      expect(personal).toContain('doc_ws_personal');
+      expect(personal).toContain('doc_ws_legacy');
+      expect(personal).not.toContain('doc_ws_church');
+
+      const church = await ids('/api/documents', { 'X-Org-Id': 'org_wsfilter' });
+      expect(church).toEqual(['doc_ws_church']);
+
+      const all = await ids('/api/documents?scope=all');
+      expect(all).toEqual(expect.arrayContaining(['doc_ws_church', 'doc_ws_personal', 'doc_ws_legacy']));
+
+      const search = await ids('/api/documents/search?q=doc_ws');
+      expect(search).not.toContain('doc_ws_church');
+    });
+  });
+
   describe('POST /api/documents', () => {
     it('should require authentication', async () => {
       const res = await app.request('/api/documents', {

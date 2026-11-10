@@ -1,3 +1,5 @@
+import { and, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import * as schema from '../db/schema';
 import type { Env } from '../types';
 import { ensurePersonalOrgAccount, isOrgAdmin, implicitWorkspaceRole, listImplicitWorkspaces } from './orgAccounts';
 
@@ -212,4 +214,21 @@ export async function removeMember(
     await env.DB.prepare("UPDATE users SET active_org_id = ? WHERE id = ?")
       .bind(pOrg, targetUserId).run();
   }
+}
+
+/**
+ * Which documents a list or search shows for the given workspaces (the active one, or every one the caller belongs to for
+ * ?scope=all): those workspaces' documents, plus documents shared with the caller directly (shown wherever they are). The
+ * caller's own documents that predate workspaces (org_id NULL) belong to the personal workspace, so they appear only when it
+ * is included. Documents the caller owns in a workspace that is not included are excluded.
+ */
+export function workspaceFilter(userId: string, orgIds: string[], sharedDocIds: string[]): SQL {
+  const clauses: (SQL | undefined)[] = [
+    orgIds.length > 0 ? inArray(schema.documents.orgId, orgIds) : undefined,
+    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined,
+  ];
+  if (orgIds.includes(personalOrgId(userId))) {
+    clauses.push(and(eq(schema.documents.userId, userId), isNull(schema.documents.orgId)));
+  }
+  return or(...clauses) ?? sql`0`;
 }

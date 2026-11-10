@@ -14,7 +14,7 @@ import {
   listUnfiledDocuments,
   ownerFilter,
 } from "../services/classification";
-import { resolveScope, listOrganizationsForUser, switchActiveOrg, createOrganization } from "../lib/orgs";
+import { resolveScope, workspaceFilter, listOrganizationsForUser, switchActiveOrg, createOrganization } from "../lib/orgs";
 import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib/documentShares";
 import { publishDocument, unpublishDocument, PublishError } from "../lib/publishing";
 import { checkScribeQuota, reportScribeQuota } from "../lib/quota";
@@ -85,11 +85,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
     ).bind(userId, email).all<{ document_id: string }>();
     const sharedDocIds = results.map((r) => r.document_id);
 
-    const filter = or(
-      eq(schema.documents.userId, userId),
-      eq(schema.documents.orgId, activeOrgId),
-      sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined
-    );
+    const filter = workspaceFilter(userId, [activeOrgId], sharedDocIds);
 
     return { filter, activeOrgId };
   }

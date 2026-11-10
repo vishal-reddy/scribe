@@ -4,6 +4,7 @@ import { eq, desc, count, or, sql } from 'drizzle-orm';
 import { zValidator } from '@hono/zod-validator';
 import Anthropic from '@anthropic-ai/sdk';
 import * as schema from '../db/schema';
+import { resolveScope, workspaceFilter } from '../lib/orgs';
 import { claudeCreateDocumentSchema, claudeEditDocumentSchema, claudePromptSchema, type Env } from '../types';
 import { markdownToYjsUpdate } from '../lib/yjs-utils';
 import { createClaudeEditNotification, storeNotification } from '../lib/notifications';
@@ -51,7 +52,8 @@ claude.get('/artifacts', async (c) => {
   const { limit, offset } = parsePagination(c);
   const userId = c.get('userId');
 
-  const ownershipFilter = eq(schema.documents.userId, userId);
+  const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
+  const ownershipFilter = workspaceFilter(userId, [activeOrgId], []);
 
   try {
     const documents = await db

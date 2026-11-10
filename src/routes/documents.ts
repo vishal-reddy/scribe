@@ -8,7 +8,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { createDocumentSchema, updateDocumentSchema } from '../types';
 import type { Env } from '../types';
-import { resolveScope, listOrganizationsForUser } from '../lib/orgs';
+import { resolveScope, workspaceFilter, listOrganizationsForUser } from '../lib/orgs';
 import {
   getDocumentPermission,
   shareDocument,
@@ -75,11 +75,7 @@ documents.get('/search', async (c) => {
     ? (await listOrganizationsForUser(c.env, userId)).map((o) => o.id)
     : [activeOrgId];
 
-  const ownershipFilter = or(
-    eq(schema.documents.userId, userId),
-    inArray(schema.documents.orgId, memberOrgIds),
-    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined
-  );
+  const ownershipFilter = workspaceFilter(userId, memberOrgIds, sharedDocIds);
 
   try {
     const results = await db
@@ -161,11 +157,7 @@ documents.get('/', async (c) => {
     ? (await listOrganizationsForUser(c.env, userId)).map((o) => o.id)
     : [activeOrgId];
 
-  const ownershipFilter = or(
-    eq(schema.documents.userId, userId),
-    inArray(schema.documents.orgId, memberOrgIds),
-    sharedDocIds.length > 0 ? inArray(schema.documents.id, sharedDocIds) : undefined
-  );
+  const ownershipFilter = workspaceFilter(userId, memberOrgIds, sharedDocIds);
 
   try {
     const allDocs = await db

@@ -34,6 +34,8 @@ export interface Env {
   APP_BASE_URL?: string;
   /** The Kecker MCP hub origin for quota reporting and token audience. Unset means prod (https://mcp.kecker.co). */
   HUB_URL?: string;
+  /** Authorizes this Worker to read the hub's shared org/workspace registry on a user's behalf. */
+  HUB_ADMIN_SECRET?: string;
   /** Audience of hub-forwarded tokens. Unset means https://mcp.kecker.co in every environment (dev reuses prod Kinde). */
   HUB_AUDIENCE?: string;
   /** "off" removes the writing-coach section from the MCP server instructions (default on). */

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
+import { mirrorRegistryFor } from '../lib/registrySync';
 import {
   WORKSPACE_VISIBILITIES,
   createOrgAccount,
@@ -29,11 +30,16 @@ function fail(c: any, e: unknown) {
 
 const visibilitySchema = z.enum(WORKSPACE_VISIBILITIES as [string, ...string[]]);
 
-orgAccounts.get('/', async (c) => c.json({ orgs: await listOrgAccountsForUser(c.env, c.get('userId')) }));
+orgAccounts.get('/', async (c) => {
+  await mirrorRegistryFor(c.env, c.get('userId'));
+  return c.json({ orgs: await listOrgAccountsForUser(c.env, c.get('userId')) });
+});
 
 orgAccounts.post('/', zValidator('json', z.object({ name: z.string().min(1).max(100).transform((s) => s.trim()) })), async (c) => {
-  const id = await createOrgAccount(c.env, c.get('userId'), c.req.valid('json').name);
-  return c.json({ id }, 201);
+  try {
+    const id = await createOrgAccount(c.env, c.get('userId'), c.req.valid('json').name);
+    return c.json({ id }, 201);
+  } catch (e) { return fail(c, e); }
 });
 
 const patchSchema = z.object({

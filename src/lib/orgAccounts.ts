@@ -1,3 +1,4 @@
+import { requireOrgCreator } from './orgCreators';
 import type { Env } from '../types';
 
 /**
@@ -90,6 +91,7 @@ export interface OrgAccount {
 }
 
 export async function createOrgAccount(env: Env, userId: string, name: string): Promise<string> {
+  await requireOrgCreator(env, userId);
   const id = `orgacct_${crypto.randomUUID()}`;
   const now = Date.now();
   await env.DB.prepare("INSERT INTO orgs (id, name, is_personal, owner_user_id, created_at) VALUES (?, ?, 0, ?, ?)").bind(id, name, userId, now).run();

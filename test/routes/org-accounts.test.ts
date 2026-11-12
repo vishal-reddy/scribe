@@ -10,7 +10,8 @@ const call = (email: string, method: string, path: string, body?: unknown) =>
   app.request(path, { method, headers: h(email), body: body === undefined ? undefined : JSON.stringify(body) }, env);
 const json = async (r: Response) => (await r.json()) as any;
 
-const owner = 'org-owner@example.com';
+// Only Kecker staff can create business orgs (lib/orgCreators.ts), so the org owner here is staff.
+const owner = 'vlukereddy@gmail.com';
 const admin = 'org-admin@example.com';
 const member = 'org-member@example.com';
 const outsider = 'org-outsider@example.com';
@@ -200,5 +201,11 @@ describe('orgs, workspaces and visibility', () => {
 
     // Only org owners and admins may assign.
     expect((await call(member, 'POST', `/api/org-accounts/${org}/members`, { email: late, workspaceIds: [wsA] })).status).toBe(403);
+  });
+
+  it('tells everyone else to contact Kecker for a new organization', async () => {
+    const res = await call(outsider, 'POST', '/api/org-accounts', { name: 'Nope' });
+    expect(res.status).toBe(403);
+    expect((await json(res)).error).toContain('Contact Kecker for a new organization');
   });
 });

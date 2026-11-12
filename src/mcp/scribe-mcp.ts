@@ -14,6 +14,7 @@ import {
   listUnfiledDocuments,
   ownerFilter,
 } from "../services/classification";
+import { mirrorRegistryFor } from "../lib/registrySync";
 import { resolveScope, workspaceFilter, listOrganizationsForUser, switchActiveOrg, createOrganization } from "../lib/orgs";
 import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib/documentShares";
 import { publishDocument, unpublishDocument, PublishError } from "../lib/publishing";
@@ -1108,6 +1109,7 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         return { content: [{ type: "text" as const, text: "No organizations available in unscoped mode." }] };
       }
       const activeOrgId = await resolveScope(this.env, userId);
+      await mirrorRegistryFor(this.env, userId);
       const orgs = await listOrganizationsForUser(this.env, userId);
       const enriched = orgs.map((o) => ({ ...o, isActive: o.id === activeOrgId }));
       return {

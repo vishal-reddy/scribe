@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { appBaseUrl } from '../lib/urls';
+import { mirrorRegistryFor } from '../lib/registrySync';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
@@ -32,6 +33,7 @@ function forbidden(c: any, e: unknown) {
 // GET /api/orgs — every workspace the caller belongs to
 orgs.get('/', async (c) => {
   const userId = c.get('userId');
+  await mirrorRegistryFor(c.env, userId);
   const orgList = await listOrganizationsForUser(c.env, userId);
   const activeOrgId = await resolveScope(c.env, userId, c.req.header('X-Org-Id'));
   return c.json({

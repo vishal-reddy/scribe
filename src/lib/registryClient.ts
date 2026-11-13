@@ -34,7 +34,7 @@ export class RegistryClient {
     headers.set("X-Kecker-User-Id", this.user.userId);
     if (this.user.email) headers.set("X-Kecker-User-Email", this.user.email);
     if (init.body) headers.set("Content-Type", "application/json");
-    return this.fetcher(`${hubUrl(this.env)}/api/registry${path}`, { ...init, headers });
+    return this.fetcher.call(globalThis, `${hubUrl(this.env)}/api/registry${path}`, { ...init, headers });
   }
 
   /** Maps a legacy per-app org or workspace id to the hub's canonical record, or null when the hub does not know it. */

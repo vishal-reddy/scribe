@@ -242,3 +242,14 @@ export type NewOrgInvite = typeof orgInvites.$inferInsert;
 export type DocumentShare = typeof documentShares.$inferSelect;
 export type NewDocumentShare = typeof documentShares.$inferInsert;
 
+
+// Organization philosophy: how documents are filed. Absent = the built-in Thomistic scheme (see lib/philosophy.ts).
+export const philosophies = sqliteTable('philosophies', {
+  scopeType: text('scope_type').notNull(), // 'user' | 'org' | 'workspace'
+  scopeId: text('scope_id').notNull(), // user id | orgs.id | organizations.id
+  instructions: text('instructions').notNull(),
+  updatedBy: text('updated_by').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.scopeType, table.scopeId] }),
+]);

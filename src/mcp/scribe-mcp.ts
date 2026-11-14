@@ -15,7 +15,12 @@ import {
   ownerFilter,
 } from "../services/classification";
 import { mirrorRegistryFor } from "../lib/registrySync";
-import { resolveScope, workspaceFilter, listOrganizationsForUser, switchActiveOrg, createOrganization } from "../lib/orgs";
+import {
+  PhilosophyPermissionError, canRestructure, effectivePhilosophy, getPhilosophy, orgOfWorkspace, parsePhilosophyScope,
+  setPhilosophy, validatePhilosophyText, type PhilosophyScope,
+} from "../lib/philosophy";
+import { MAX_MOVES_PER_CALL, listScopeDocuments, moveDocuments, philosophyGuidance } from "../services/restructure";
+import { resolveScope, workspaceFilter, listOrganizationsForUser, switchActiveOrg, createOrganization, personalOrgId } from "../lib/orgs";
 import { getDocumentPermission, shareDocument, listDocumentShares } from "../lib/documentShares";
 import { publishDocument, unpublishDocument, PublishError } from "../lib/publishing";
 import { checkScribeQuota, reportScribeQuota } from "../lib/quota";
@@ -71,6 +76,37 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
   private userIdOrNull(): string | null {
     const id = this.userId();
     return id || null;
+  }
+
+  /** The workspace the caller is working in (their active one), or null when unscoped. */
+  private async activeWorkspaceId(): Promise<string | null> {
+    const userId = this.userId();
+    return userId ? resolveScope(this.env, userId) : null;
+  }
+
+  private async activePhilosophy() {
+    const ws = await this.activeWorkspaceId();
+    return effectivePhilosophy(this.env, this.userId(), ws);
+  }
+
+  /** Set (non-empty text) or reset (empty text) a philosophy for the active workspace, org or the caller. */
+  private async changePhilosophy(scope: PhilosophyScope, text: string) {
+    const userId = this.userId();
+    const ws = await this.activeWorkspaceId();
+    if (!userId || !ws) return { content: [{ type: "text" as const, text: "Sign in to change the philosophy." }], isError: true };
+    const parsed = parsePhilosophyScope(scope);
+    if (!parsed) return { content: [{ type: "text" as const, text: "scope must be user, org or workspace." }], isError: true };
+    const scopeId = parsed === "user" ? userId : parsed === "workspace" ? ws : await orgOfWorkspace(this.env, ws);
+    if (!scopeId) return { content: [{ type: "text" as const, text: "The active workspace has no organization; use scope 'workspace' or 'user'." }], isError: true };
+    const valid = text ? validatePhilosophyText(text, parsed) : { text: "" };
+    if ("error" in valid) return { content: [{ type: "text" as const, text: valid.error }], isError: true };
+    try {
+      await setPhilosophy(this.env, userId, parsed, scopeId, valid.text);
+    } catch (e) {
+      if (e instanceof PhilosophyPermissionError) return { content: [{ type: "text" as const, text: e.message }], isError: true };
+      throw e;
+    }
+    return { content: [{ type: "text" as const, text: valid.text ? `The ${parsed} philosophy is set.` : `The ${parsed} philosophy is reset.` }] };
   }
 
   private async getScopeFilter() {
@@ -561,33 +597,35 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
     // category here in the MCP session; the server only does the filing.
 
     this.server.registerTool("list_categories", {
-      title: "List Scribe taxonomy categories",
+      title: "List Scribe filing guidance",
       description:
-        "List the Thomistic taxonomy of the sciences and arts used to organize Scribe documents. " +
-        "Use this to choose a category before calling file_document. Takes no arguments.",
+        "Get how Scribe documents are organized for this user: the organization philosophy in effect (workspace, then " +
+        "organization, then personal) or, when none is set, the default Thomistic taxonomy of the sciences and arts. " +
+        "Use this before calling file_document. Takes no arguments.",
       inputSchema: {},
       annotations: {
-        title: "List Scribe taxonomy categories",
+        title: "List Scribe filing guidance",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: false,
       },
-    }, async () => ({
-      content: [{ type: "text" as const, text: TAXONOMY_GUIDANCE }],
-    }));
+    }, async () => {
+      const eff = await this.activePhilosophy();
+      return { content: [{ type: "text" as const, text: eff.text ? philosophyGuidance(eff) : TAXONOMY_GUIDANCE }] };
+    });
 
     this.server.registerTool("file_document", {
       title: "File a Scribe document under a category",
       description:
-        "File a Scribe document (note) under its Thomistic taxonomy category — i.e. organize/move it " +
-        "into the right folder. Creates the category folder (and its parent division) if needed and " +
-        "sets the document's parent. Call this after classifying a document with the taxonomy from " +
-        "list_categories.",
+        "File a Scribe document (note) into the right folder. With the default scheme, pass a Thomistic taxonomy " +
+        "category from list_categories. When the user, organization or workspace has set its own organization " +
+        "philosophy, pass a folder path instead (up to 4 levels separated by \"/\", e.g. \"Projects/Alpha\"). " +
+        "Creates any missing folders. Call list_categories first to see which applies.",
       inputSchema: {
         documentId: z.string().describe("The ID of the document to file"),
         category: z
           .string()
-          .describe(`The taxonomy leaf to file under. One of: ${TAXONOMY_CATEGORIES.join(", ")}`),
+          .describe(`Default scheme: one of ${TAXONOMY_CATEGORIES.join(", ")}. Custom philosophy: a folder path such as "Projects/Alpha".`),
       },
       annotations: {
         title: "File a Scribe document under a category",
@@ -598,6 +636,17 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
       },
     }, async ({ documentId, category }) => {
       const db = this.getDb();
+      const userId = this.userId();
+      const doc = await this.env.DB.prepare("SELECT org_id AS orgId FROM documents WHERE id = ?").bind(documentId).first<{ orgId: string | null }>();
+      const workspaceId = doc ? doc.orgId ?? (userId ? personalOrgId(userId) : null) : null;
+      const eff = userId && workspaceId ? await effectivePhilosophy(this.env, userId, workspaceId) : null;
+
+      if (eff?.text && workspaceId) {
+        const res = await moveDocuments(this.env, { userId }, workspaceId, [{ documentId, path: category }], { requireOwned: true });
+        if (!res.ok) return { content: [{ type: "text" as const, text: `Could not file document: ${res.errors.join(" ")}` }], isError: true };
+        return { content: [{ type: "text" as const, text: `Filed under "${category}" (${eff.level} philosophy).` }] };
+      }
+
       const result = await fileDocumentInCategory(db, documentId, category, this.userIdOrNull());
       if (!result) {
         return {
@@ -616,6 +665,103 @@ export class ScribeMCP extends McpAgent<Env, State, ScribeMcpProps> {
         content: [
           { type: "text" as const, text: `Filed under "${result.category}".` },
         ],
+      };
+    });
+
+    // ── Organization philosophy ─────────────────────────────────────────
+    // Free-text instructions for how documents are filed, at user, org or workspace level. Anyone can set their own;
+    // org and workspace levels (and bulk restructures of a shared workspace) are for owners and admins.
+
+    const scopeArg = z.enum(["user", "org", "workspace"]).describe("user = you; org = the organization of the active workspace; workspace = the active workspace");
+
+    this.server.registerTool("get_philosophy", {
+      title: "Get the organization philosophy",
+      description:
+        "Show the organization philosophy in effect for the active workspace and which level it comes from " +
+        "(workspace, org, user, or the built-in default), plus each level's own text.",
+      inputSchema: {},
+      annotations: { title: "Get the organization philosophy", readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    }, async () => {
+      const userId = this.userId();
+      const ws = await this.activeWorkspaceId();
+      const eff = await this.activePhilosophy();
+      const orgId = ws ? await orgOfWorkspace(this.env, ws) : null;
+      const [u, o, w] = await Promise.all([
+        userId ? getPhilosophy(this.env, "user", userId) : null,
+        orgId ? getPhilosophy(this.env, "org", orgId) : null,
+        ws ? getPhilosophy(this.env, "workspace", ws) : null,
+      ]);
+      const show = (t?: string) => (t ? t : "(not set)");
+      return {
+        content: [{
+          type: "text" as const,
+          text:
+            `In effect: ${eff.level === "default" ? "the built-in Thomistic scheme" : `${eff.level} philosophy`}\n\n` +
+            `Workspace: ${show(w?.instructions)}\nOrganization: ${orgId ? show(o?.instructions) : "(this workspace has no organization)"}\nPersonal: ${show(u?.instructions)}`,
+        }],
+      };
+    });
+
+    this.server.registerTool("set_philosophy", {
+      title: "Set an organization philosophy",
+      description:
+        "Replace the default Thomistic scheme with your own filing philosophy at a scope: 'user' (anyone), or 'org' / " +
+        "'workspace' (owners and admins only, for the active workspace). Describe how documents should be grouped, " +
+        "e.g. 'Group by client, then by project; keep meeting notes under the project they belong to.'",
+      inputSchema: {
+        scope: scopeArg,
+        text: z.string().describe("The philosophy, in plain language (up to 4000 characters)"),
+      },
+      annotations: { title: "Set an organization philosophy", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, async ({ scope, text }) => this.changePhilosophy(scope, text));
+
+    this.server.registerTool("reset_philosophy", {
+      title: "Reset an organization philosophy",
+      description: "Remove the philosophy at a scope so it falls back to the next level, or to the default Thomistic scheme.",
+      inputSchema: { scope: scopeArg },
+      annotations: { title: "Reset an organization philosophy", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, async ({ scope }) => this.changePhilosophy(scope, ""));
+
+    this.server.registerTool("restructure_documents", {
+      title: "Restructure documents under a philosophy",
+      description:
+        "Refile many documents at once from an ad hoc command, e.g. 'regroup everything by client'. Two steps. " +
+        "(1) Call with `command` (and optionally `philosophy` to use instead of the one in effect): it returns the " +
+        "documents in the active workspace with where each one sits now, plus the philosophy to follow. Decide a folder " +
+        "path for each. (2) Call again with `moves` ([{documentId, path}]): all moves apply together or not at all. " +
+        `Up to ${MAX_MOVES_PER_CALL} moves per call; page through with \`offset\`. In a shared workspace this needs an owner or admin.`,
+      inputSchema: {
+        command: z.string().optional().describe("What the user asked for, in their words (step 1)"),
+        philosophy: z.string().optional().describe("A philosophy to use for this restructure only, instead of the one in effect (step 1)"),
+        offset: z.number().optional().describe("Where to start listing documents (step 1; default 0)"),
+        moves: z.array(z.object({ documentId: z.string(), path: z.string() })).optional().describe("The refiling to apply (step 2)"),
+      },
+      annotations: { title: "Restructure documents under a philosophy", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, async ({ command, philosophy, offset, moves }) => {
+      const userId = this.userId();
+      const ws = await this.activeWorkspaceId();
+      if (!userId || !ws) return { content: [{ type: "text" as const, text: "Sign in to restructure documents." }], isError: true };
+      if (!(await canRestructure(this.env, userId, ws))) {
+        return { content: [{ type: "text" as const, text: "Only owners and admins can restructure a shared workspace." }], isError: true };
+      }
+      if (moves?.length) {
+        const res = await moveDocuments(this.env, { userId }, ws, moves, { requireOwned: false });
+        if (!res.ok) return { content: [{ type: "text" as const, text: `Nothing was changed. ${res.errors.join(" ")}` }], isError: true };
+        return { content: [{ type: "text" as const, text: `Moved ${res.moved} document(s)${res.unchanged ? `, ${res.unchanged} already in place` : ""}; ${res.foldersCreated} folder(s) created.` }] };
+      }
+      const eff = await this.activePhilosophy();
+      const custom = philosophy?.trim();
+      const instructions = custom || eff.text || TAXONOMY_GUIDANCE;
+      const { docs, total } = await listScopeDocuments(this.env, userId, ws, 100, offset ?? 0);
+      const list = docs.map((d) => `- ${d.id} | ${d.folder || "(unfiled)"} | ${d.title}${d.snippet ? ` — ${d.snippet.replace(/\s+/g, " ")}` : ""}`).join("\n");
+      return {
+        content: [{
+          type: "text" as const,
+          text:
+            `Command: ${command ?? "(none given)"}\n\nFollow this philosophy:\n${instructions}\n\n` +
+            `${total} document(s) in scope; showing ${docs.length} from ${offset ?? 0} (id | current folder | title):\n${list}\n\n` +
+            `Now call restructure_documents again with moves [{documentId, path}] using folder paths of up to 4 levels.`,
+        }],
       };
     });
 
